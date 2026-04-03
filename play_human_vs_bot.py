@@ -1,18 +1,44 @@
 """
 Play the training environment locally with Tkinter (stdlib on Windows).
 
+Terminal (PowerShell) from any folder:
+    Set-Location "c:\\Users\\aled_\\Downloads\\Pong RL"
+
+No neural net (you = right paddle vs rule-based bot):
+    py play_human_vs_bot.py
+
+All checkpoints in one session (recommended): pass a `--model` path **without** `--no-auto-pair`.
+The script then loads **every** `models/*.zip` (and may add the paired default phase `.zip`), so
+you can switch with the top bar or **M**:
+    py play_human_vs_bot.py --model models/pong_competent.zip
+
+Current `models/*.zip` included in that merge (after training, list files and extend this list):
+    PowerShell: Get-ChildItem models\\*.zip
+    - models/pong_competent.zip
+    - models/pong_margin_targeting.zip
+
+Single checkpoint only (`--no-auto-pair` turns off the `models/*.zip` merge and phase pairing):
+    py play_human_vs_bot.py --no-auto-pair --model models/pong_competent.zip
+    py play_human_vs_bot.py --no-auto-pair --model models/pong_margin_targeting.zip
+
+Multiple explicit paths (merge still adds any other `models/*.zip` unless you pass `--no-auto-pair`):
+    py play_human_vs_bot.py --model models/pong_competent.zip --model models/pong_margin_targeting.zip
+
 Two modes:
 - **Default:** you control the **right** paddle vs rule-based (or idle) bot on the **left**
   (same sides as Phase 1 training, but you substitute for the RL policy).
-- **With --model:** load a PPO `.zip`; you control the **left** paddle vs the policy on the **right**
+- **With --model:** load a PPO ``.zip``; you control the **left** paddle vs the policy on the **right**
   (matches how the network was trained: agent = right).
 
 Click the court to toggle **KEYS** ↔ **MOUSE**. Optional `--hold-steps` applies action hold
-(SmoothActionWrapper in default mode; ActionSmoother on your inputs in --model mode).
+(SmoothActionWrapper in default mode; ActionSmoother on your inputs in `--model` mode).
 
-Run from project root:
+Also from project root with `python`:
     python play_human_vs_bot.py
     python play_human_vs_bot.py --model models/pong_competent.zip
+  Use `--no-auto-pair` to disable merging extra `models/*.zip`. With 2+ loaded checkpoints,
+  use **Previous model** / **Next model** or **M**. The window uses a wide layout with a centered
+  rectangular playfield.
 """
 
 from __future__ import annotations
@@ -33,14 +59,53 @@ import config as cfg
 from envs.pong_env import PongEnv
 
 
+def _try_utf8_stdio() -> None:
+    """Windows consoles often use cp1252; UTF-8 avoids UnicodeEncodeError on --help text."""
+    if sys.platform != "win32":
+        return
+    for stream in (sys.stdout, sys.stderr):
+        if stream is None or not hasattr(stream, "reconfigure"):
+            continue
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, OSError, ValueError):
+            pass
+
+
+def _safe_print(*args: object, **kwargs: object) -> None:
+    """Some IDE / GUI launchers set sys.stdout to None; avoid crashing before the Tk window opens."""
+    if sys.stdout is None:
+        return
+    kwargs.setdefault("flush", True)
+    try:
+        print(*args, **kwargs)
+    except (OSError, TypeError, UnicodeEncodeError):
+        pass
+
+
+def _safe_eprint(*args: object, **kwargs: object) -> None:
+    if sys.stderr is None:
+        return
+    kwargs.setdefault("file", sys.stderr)
+    kwargs.setdefault("flush", True)
+    try:
+        print(*args, **kwargs)
+    except (OSError, TypeError, UnicodeEncodeError):
+        pass
+
+
 def main() -> None:
+    _try_utf8_stdio()
+
     parser = argparse.ArgumentParser(description="Human playtest (Tkinter).")
     parser.add_argument(
         "--model",
-        type=str,
-        default=None,
+        action="append",
+        dest="model_paths",
         metavar="PATH",
-        help="PPO checkpoint .zip — you play LEFT vs policy on RIGHT (e.g. models/pong_competent.zip).",
+        default=None,
+        help="PPO checkpoint .zip — you play LEFT vs policy on RIGHT. "
+        "Pass multiple times to cycle checkpoints in-game (buttons or M).",
     )
     parser.add_argument(
         "--opponent",
@@ -52,14 +117,14 @@ def main() -> None:
     parser.add_argument(
         "--fps",
         type=int,
-        default=40,
-        help="Display / physics tick rate (lower = calmer; default 40).",
+        default=cfg.FPS,
+        help=f"Display / physics tick rate (default {cfg.FPS}).",
     )
     parser.add_argument(
         "--paddle-speed-scale",
         type=float,
-        default=0.58,
-        help="Multiplies paddle speed vs training (default 0.58 = smoother).",
+        default=1.0,
+        help="Multiplies paddle speed (default 1.0 = shared baseline).",
     )
     parser.add_argument(
         "--mouse-deadzone",
@@ -70,8 +135,8 @@ def main() -> None:
     parser.add_argument(
         "--ball-speed-scale",
         type=float,
-        default=0.38,
-        help="Ball speed vs training (default 0.38 ≈ easier reactions).",
+        default=1.0,
+        help="Ball speed scale (default 1.0 = shared baseline).",
     )
     parser.add_argument(
         "--hold-steps",
@@ -79,24 +144,84 @@ def main() -> None:
         default=cfg.ACTION_HOLD_STEPS,
         help="Hold raw action N frames before switching (1 = off / no smoothing).",
     )
+    parser.add_argument(
+        "--no-auto-pair",
+        action="store_true",
+        help="Only load paths you pass: no phase-2 pairing, no extra models/*.zip merge.",
+    )
     args = parser.parse_args()
 
     os.chdir(_ROOT)
 
-    vs_ppo = args.model is not None
+    def _as_zip(p: Path) -> Path:
+        return p if p.suffix.lower() == ".zip" else p.with_suffix(".zip")
+
+    raw_paths = args.model_paths or []
+    model_paths: list[Path] = []
+    seen_resolved: set[Path] = set()
+    for s in raw_paths:
+        p = Path(s)
+        r = p.resolve()
+        if r in seen_resolved:
+            continue
+        seen_resolved.add(r)
+        model_paths.append(p)
+
+    if (
+        len(model_paths) == 1
+        and not args.no_auto_pair
+    ):
+        user_r = model_paths[0].resolve()
+        for rel in (cfg.PHASE2_MODEL_PATH, cfg.PHASE1_MODEL_PATH):
+            cand = _as_zip(Path(rel))
+            cr = cand.resolve()
+            if cr != user_r and cand.is_file():
+                seen_resolved.add(cr)
+                model_paths.append(cand)
+                break
+
+    # Any other checkpoints in models/ → same session can switch without listing each CLI path.
+    if model_paths and not args.no_auto_pair:
+        models_dir = Path(_ROOT) / "models"
+        if models_dir.is_dir():
+            for p in sorted(models_dir.glob("*.zip"), key=lambda x: x.name.lower()):
+                r = p.resolve()
+                if r not in seen_resolved:
+                    seen_resolved.add(r)
+                    model_paths.append(p)
+
+    vs_ppo = len(model_paths) > 0
+    if vs_ppo:
+        n_m = len(model_paths)
+        _safe_print(
+            f"[play] PPO mode: {n_m} checkpoint(s). "
+            + (
+                "Use the top bar or M to switch."
+                if n_m > 1
+                else "Only one .zip — add another under models/ or pass --model twice."
+            ),
+        )
+    else:
+        _safe_print(
+            "[play] You = right paddle vs rule-based bot (no neural net). "
+            "Run with --model models/pong_competent.zip to play vs PPO and switch models.",
+        )
     model = None
     human_smoother = None
+    model_index = 0
 
     if vs_ppo:
-        path = Path(args.model)
-        if not path.is_file():
-            print(f"Model not found: {path.resolve()}", file=sys.stderr)
-            sys.exit(1)
+        for p in model_paths:
+            if not p.is_file():
+                _safe_eprint(f"Model not found: {p.resolve()}")
+                sys.exit(1)
         if args.opponent != "rule_based":
-            print("[play] Note: --opponent is ignored when --model is set (you vs PPO).")
+            _safe_print(
+                "[play] Note: --opponent is ignored when --model is set (you vs PPO).",
+            )
         from stable_baselines3 import PPO
 
-        model = PPO.load(str(path))
+        model = PPO.load(str(model_paths[model_index]))
         base = PongEnv(
             opponent="keyboard",
             render_mode=None,
@@ -122,37 +247,34 @@ def main() -> None:
             env = SmoothActionWrapper(env, hold_steps=args.hold_steps)
 
     obs, _ = env.reset(seed=args.seed)
-    model_basename = Path(args.model).name if vs_ppo else ""
 
-    w_px, h_px = 400.0, 400.0
+    # Wide window with a centered rectangular gameplay field.
+    window_w_px, window_h_px = 1200.0, 700.0
+    field_w_px, field_h_px = 1030.0, 560.0
+    field_left_px = (window_w_px - field_w_px) / 2.0
+    field_top_px = (window_h_px - field_h_px) / 2.0
+    field_right_px = field_left_px + field_w_px
+    field_bottom_px = field_top_px + field_h_px
+
     root = tk.Tk()
-    title = "Pong RL — PPO vs human" if vs_ppo else "Pong RL — human vs bot"
-    if vs_ppo and model_basename:
-        title = f"{title} ({model_basename})"
-    root.title(title)
+    root.geometry(f"{int(window_w_px)}x{int(window_h_px)}")
+    root.minsize(int(window_w_px), int(window_h_px))
+
+    def window_title() -> str:
+        t = "Pong RL — PPO vs human" if vs_ppo else "Pong RL — human vs bot"
+        if vs_ppo and model_paths:
+            t = f"{t} ({model_paths[model_index].name})"
+        return t
+
+    root.title(window_title())
     canvas = tk.Canvas(
         root,
-        width=int(w_px),
-        height=int(h_px),
-        bg="#181820",
+        width=int(window_w_px),
+        height=int(window_h_px),
+        bg="#000000",
         highlightthickness=2,
-        highlightbackground="#2a2a36",
+        highlightbackground="#f2f2f2",
     )
-    canvas.pack()
-
-    status = tk.Label(
-        root,
-        text="",
-        anchor="w",
-        justify="left",
-        bg="#101016",
-        fg="#dcdce6",
-        padx=8,
-        pady=8,
-        height=5,
-        font=tkfont.Font(family="Segoe UI", size=11),
-    )
-    status.pack(fill="x")
 
     held: set[str] = set()
     done = False
@@ -170,14 +292,45 @@ def main() -> None:
         assert isinstance(c, PongEnv)
 
         def to_cx(x: float) -> float:
-            return x * w_px
+            # Map court x to the rectangular field width.
+            return field_left_px + (x * field_w_px)
 
         def to_cy(y: float) -> float:
-            return (1.0 - y) * h_px
+            # Map court y to the rectangular field height.
+            return field_top_px + ((1.0 - y) * field_h_px)
 
-        half_w = cfg.PADDLE_HALF_WIDTH * w_px
-        half_h = cfg.PADDLE_HALF_HEIGHT * h_px
-        br = cfg.BALL_RADIUS * min(w_px, h_px)
+        # Minimal classic Pong field.
+        canvas.create_rectangle(
+            0,
+            0,
+            window_w_px,
+            window_h_px,
+            fill="#000000",
+            outline="",
+        )
+        canvas.create_rectangle(
+            field_left_px,
+            field_top_px,
+            field_right_px,
+            field_bottom_px,
+            fill="#000000",
+            outline="#000000",
+            width=0,
+        )
+        mid_x = (field_left_px + field_right_px) * 0.5
+        canvas.create_line(
+            mid_x,
+            field_top_px,
+            mid_x,
+            field_bottom_px,
+            fill="#f2f2f2",
+            width=4,
+            dash=(9, 12),
+        )
+
+        half_w = cfg.PADDLE_HALF_WIDTH * field_w_px
+        half_h = cfg.PADDLE_HALF_HEIGHT * field_h_px
+        br = cfg.BALL_RADIUS * min(field_w_px, field_h_px)
 
         bx, by = to_cx(c.ball_x), to_cy(c.ball_y)
         half_ball_w = br * 0.48
@@ -187,9 +340,9 @@ def main() -> None:
             by - half_ball_h,
             bx + half_ball_w,
             by + half_ball_h,
-            fill="#fa5a5a",
-            outline="#7a2020",
-            width=2,
+            fill="#f2f2f2",
+            outline="#f2f2f2",
+            width=0,
         )
 
         for px, py in ((c._human_x, c.human_y), (c._agent_x, c.agent_y)):
@@ -199,28 +352,115 @@ def main() -> None:
                 cy - half_h,
                 cx + half_w,
                 cy + half_h,
-                fill="#e8e8f0",
-                outline="#505060",
-                width=2,
+                fill="#f2f2f2",
+                outline="#f2f2f2",
+                width=0,
             )
 
         sa, sh = int(obs[6]), int(obs[7])
-        tm = int(round(float(obs[8])))
-        margin = int(round(float(obs[9])))
-        over = "  |  GAME OVER — press R" if done else ""
-        mode_hint = "KEYS (↑/↓ or W/S)" if control_mode == "keys" else "MOUSE (move on court)"
-        if vs_ppo:
-            who = "You = LEFT (Human on scoreboard) | PPO = RIGHT (Agent on scoreboard)"
-        else:
-            who = "You = RIGHT (Agent) | Bot = LEFT (rule_based or idle)"
-        status.config(
-            text=(
-                f"{who}\n"
-                f"Agent {sa}   Human {sh}   |   target_margin {tm}   margin {margin}{over}\n"
-                f"Mode: {control_mode.upper()} — {mode_hint}\n"
-                f"Click playfield: keys ↔ mouse · R reset · Esc quit"
-            )
+        top_y = field_top_px + 26
+        canvas.create_text(
+            mid_x - 80,
+            top_y,
+            text=str(sh),
+            fill="#f2f2f2",
+            font=("Consolas", 28, "bold"),
         )
+        canvas.create_text(
+            mid_x + 80,
+            top_y,
+            text=str(sa),
+            fill="#f2f2f2",
+            font=("Consolas", 28, "bold"),
+        )
+        if done:
+            canvas.create_text(
+                mid_x,
+                field_bottom_px - 20,
+                text="GAME OVER - R to reset, Esc to quit",
+                fill="#f2f2f2",
+                font=("Consolas", 12, "bold"),
+            )
+
+    def cycle_model(delta: int) -> None:
+        nonlocal model, obs, done, model_index
+        if not vs_ppo or len(model_paths) < 2:
+            return
+        from stable_baselines3 import PPO
+
+        model_index = (model_index + delta) % len(model_paths)
+        model = PPO.load(str(model_paths[model_index]))
+        obs, _ = env.reset(seed=args.seed)
+        done = False
+        if human_smoother is not None:
+            human_smoother.reset()
+        root.title(window_title())
+        redraw()
+
+    btn_font = tkfont.Font(family="Segoe UI", size=10, weight="bold")
+    hint_font = tkfont.Font(family="Segoe UI", size=9)
+    model_bar = tk.Frame(root, bg="#000000", pady=6, padx=4)
+    if vs_ppo:
+        multi_ckpt = len(model_paths) > 1
+        model_bar.pack(fill="x", side=tk.TOP)
+        hint = (
+            "Switch PPO · M = next"
+            if multi_ckpt
+            else "Need 2+ .zip in models/ (or --model A --model B) to switch"
+        )
+
+        def _btn(**kw: object) -> tk.Button:
+            b = tk.Button(model_bar, **kw)
+            try:
+                b.configure(
+                    relief=tk.RAISED,
+                    borderwidth=2,
+                    highlightthickness=1,
+                    highlightbackground="#606078",
+                )
+            except tk.TclError:
+                pass
+            return b
+
+        prev_b = _btn(
+            text="◀  Previous model",
+            command=lambda: cycle_model(-1),
+            font=btn_font,
+            bg="#1a1a1a",
+            fg="#ffffff",
+            activebackground="#2a2a2a",
+            activeforeground="#ffffff",
+            padx=14,
+            pady=8,
+            cursor="hand2" if multi_ckpt else "arrow",
+            takefocus=True,
+            state=tk.NORMAL if multi_ckpt else tk.DISABLED,
+        )
+        prev_b.pack(side=tk.LEFT, padx=(4, 8))
+        tk.Label(
+            model_bar,
+            text=hint,
+            bg="#000000",
+            fg="#d0d0d0",
+            font=hint_font,
+        ).pack(side=tk.LEFT, expand=True)
+        next_b = _btn(
+            text="Next model  ▶",
+            command=lambda: cycle_model(1),
+            font=btn_font,
+            bg="#1a1a1a",
+            fg="#ffffff",
+            activebackground="#2a2a2a",
+            activeforeground="#ffffff",
+            padx=14,
+            pady=8,
+            cursor="hand2" if multi_ckpt else "arrow",
+            takefocus=True,
+            state=tk.NORMAL if multi_ckpt else tk.DISABLED,
+        )
+        next_b.pack(side=tk.RIGHT, padx=(8, 4))
+
+    canvas.pack()
 
     def action_for_mouse(target_y: float) -> int:
         c = env.unwrapped
@@ -277,8 +517,14 @@ def main() -> None:
 
     running = {"ok": True}
 
-    def on_canvas_click(_e: tk.Event) -> None:
+    def on_canvas_click(e: tk.Event) -> None:
         nonlocal control_mode, mouse_target_y
+        # Keep click-to-toggle scoped to the playable rectangle.
+        if not (
+            field_left_px <= float(e.x) <= field_right_px
+            and field_top_px <= float(e.y) <= field_bottom_px
+        ):
+            return
         control_mode = "mouse" if control_mode == "keys" else "keys"
         held.clear()
         if control_mode == "keys":
@@ -292,7 +538,9 @@ def main() -> None:
             return
         c = env.unwrapped
         assert isinstance(c, PongEnv)
-        y_court = 1.0 - (float(e.y) / h_px)
+        y_px = min(max(float(e.y), field_top_px), field_bottom_px)
+        y_rel = (y_px - field_top_px) / max(1.0, field_h_px)
+        y_court = 1.0 - y_rel
         y_court = max(c._paddle_min_y, min(c._paddle_max_y, y_court))
         mouse_target_y = y_court
 
@@ -309,6 +557,9 @@ def main() -> None:
             if human_smoother is not None:
                 human_smoother.reset()
             redraw()
+            return
+        if vs_ppo and len(model_paths) > 1 and ks in ("m", "M"):
+            cycle_model(1)
             return
         if control_mode == "keys":
             if ks in ("Up", "Down", "w", "s"):
@@ -348,4 +599,16 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        raise SystemExit(130) from None
+    except Exception:
+        _try_utf8_stdio()
+        import traceback
+
+        try:
+            traceback.print_exc()
+        except OSError:
+            pass
+        raise SystemExit(1)
