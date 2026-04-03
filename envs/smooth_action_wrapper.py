@@ -28,6 +28,11 @@ class SmoothActionWrapper(gym.Wrapper):
         self._current_action: Optional[int] = None
         self._steps_held: int = 0
 
+    @property
+    def last_executed_action(self) -> Optional[int]:
+        """Action last applied to the inner env (for eval / motor stats)."""
+        return self._current_action
+
     def reset(
         self,
         *,
