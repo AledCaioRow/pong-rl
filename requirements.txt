@@ -1,0 +1,8 @@
+# Core RL stack (installs on Python 3.10+; tested with 3.14 for these packages).
+# For pygame / local rendering, use requirements-render.txt — prefer Python 3.10–3.12
+# on Windows so pygame ships binary wheels and you avoid compiling SDL.
+
+gymnasium==1.2.3
+stable-baselines3==2.8.0
+torch==2.11.0
+numpy>=1.26,<3

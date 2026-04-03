@@ -1,0 +1,4 @@
+# Frontend / debugging (Pygame). On Windows, use Python 3.10–3.12 for prebuilt wheels.
+-r requirements.txt
+
+pygame>=2.5,<3
