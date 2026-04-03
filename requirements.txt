@@ -6,3 +6,4 @@ gymnasium==1.2.3
 stable-baselines3==2.8.0
 torch==2.11.0
 numpy>=1.26,<3
+tensorboard>=2.14,<3

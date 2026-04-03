@@ -6,8 +6,9 @@ Run from the project root, e.g.:
     python training/train_phase1.py --quick
     python training/train_phase1.py --timesteps 10000 --eval-games 5
 
-Monitoring UI: TensorBoard — py -m pip install tensorboard
-    tensorboard --logdir training/logs/phase1_ppo
+Monitoring UI: py -m pip install tensorboard
+    py -m tensorboard.main --logdir training/logs/phase1_ppo
+    (or: Scripts\\tensorboard.exe under your Python install if PATH is set)
 """
 
 from __future__ import annotations
@@ -26,6 +27,20 @@ import config as cfg
 from envs.pong_env import PongEnv
 from stable_baselines3 import PPO
 from stable_baselines3.common.env_util import make_vec_env
+
+
+def _tensorboard_log(path: str | None, no_tensorboard: bool) -> str | None:
+    if no_tensorboard or not path:
+        return None
+    try:
+        import tensorboard  # noqa: F401
+    except ImportError:
+        print(
+            "[warn] tensorboard not installed; training without TB logs. "
+            "Install: py -m pip install tensorboard"
+        )
+        return None
+    return path
 
 
 def _make_pong() -> PongEnv:
@@ -116,7 +131,7 @@ def main() -> None:
         seed=args.seed,
     )
 
-    tensorboard_log = None if args.no_tensorboard else args.tensorboard
+    tensorboard_log = _tensorboard_log(args.tensorboard, args.no_tensorboard)
     model = PPO(
         "MlpPolicy",
         vec_env,

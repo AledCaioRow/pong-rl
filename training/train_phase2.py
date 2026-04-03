@@ -31,6 +31,20 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.env_util import make_vec_env
 
 
+def _tensorboard_log(path: str | None, no_tensorboard: bool) -> str | None:
+    if no_tensorboard or not path:
+        return None
+    try:
+        import tensorboard  # noqa: F401
+    except ImportError:
+        print(
+            "[warn] tensorboard not installed; training without TB logs. "
+            "Install: py -m pip install tensorboard"
+        )
+        return None
+    return path
+
+
 def _make_margin_env() -> MarginTargetingWrapper:
     base = PongEnv(opponent="rule_based")
     return MarginTargetingWrapper(base, randomize_opponent_noise=True)
@@ -107,7 +121,7 @@ def main() -> None:
         seed=args.seed,
     )
 
-    tensorboard_log = None if args.no_tensorboard else args.tensorboard
+    tensorboard_log = _tensorboard_log(args.tensorboard, args.no_tensorboard)
     model = PPO.load(
         str(load_path),
         env=vec_env,
