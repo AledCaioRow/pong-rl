@@ -41,6 +41,10 @@ TARGET_MARGIN_MAX: int = 20
 # Gaussian noise (court height units) on the opponent's ball-y target each step.
 RULE_BASED_OPPONENT_TRACK_NOISE: float = 0.06
 
+# --- Action smoothing (Option D, inference-only; see envs/smooth_action_wrapper.py) ---
+# Minimum env steps the current discrete action is held before switching to another.
+ACTION_HOLD_STEPS: int = 3  # 1 = no smoothing (wrapper not applied in play_human when hold ≤ 1)
+
 # --- Phase 1 training defaults ---
 PHASE1_TOTAL_TIMESTEPS: int = 2_000_000
 # Smoke / “~10 min” run (use training/train_phase1.py --quick); wall time varies by CPU.

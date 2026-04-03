@@ -7,6 +7,7 @@ Uses Tkinter only (stdlib on Windows) — no pygame required.
 - Click the court to toggle **KEYS** ↔ **MOUSE** (mouse = follow paddle to cursor Y).
 - Slower paddle and **slower ball** than training defaults (play-only scales).
 - Ball is drawn as a **tall rectangle**; collisions are still the env’s circle.
+- Optional **action hold** (`--hold-steps`) smooths rapid up/down flips (inference-only).
 
 Run from project root:
     python play_human_vs_bot.py
@@ -62,6 +63,12 @@ def main() -> None:
         default=0.38,
         help="Ball speed vs training (default 0.38 ≈ easier reactions).",
     )
+    parser.add_argument(
+        "--hold-steps",
+        type=int,
+        default=cfg.ACTION_HOLD_STEPS,
+        help="Action-hold frames before a new action is applied (1=no SmoothActionWrapper).",
+    )
     args = parser.parse_args()
 
     os.chdir(_ROOT)
@@ -72,6 +79,10 @@ def main() -> None:
         paddle_speed_scale=args.paddle_speed_scale,
         ball_speed_scale=args.ball_speed_scale,
     )
+    if args.hold_steps > 1:
+        from envs.smooth_action_wrapper import SmoothActionWrapper
+
+        env = SmoothActionWrapper(env, hold_steps=args.hold_steps)
     obs, _ = env.reset(seed=args.seed)
 
     w_px, h_px = 400.0, 400.0
