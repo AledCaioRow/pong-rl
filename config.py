@@ -33,10 +33,11 @@ BALL_INITIAL_SPEED: float = 0.022
 # Used to map ball_vx, ball_vy into approximately [-1, 1] in the observation vector.
 BALL_MAX_SPEED: float = 0.072
 
-# After each paddle hit, ball speed is multiplied by this factor (then clipped); cap grows as
-# BALL_MAX_SPEED * min(factor**hits, RALLY_SPEEDUP_MAX_REL_MULT). Use 1.0 for training.
-# Human playtests often use ~1.2 for longer rallies that eventually outpace reaction time.
-RALLY_SPEEDUP_MAX_REL_MULT: float = 30.0
+# Rally escalation (same in training and human play unless overridden on PongEnv).
+# After each paddle hit, speed ×= RALLY_SPEEDUP_PER_HIT, then clip to at most
+# BALL_MAX_SPEED * ball_speed_scale * RALLY_SPEEDUP_VELOCITY_CAP_MULT ("normal" max × 1.8).
+RALLY_SPEEDUP_PER_HIT: float = 1.2
+RALLY_SPEEDUP_VELOCITY_CAP_MULT: float = 1.8
 
 # --- Observation / reward placeholders (Phase 2+) ---
 TARGET_MARGIN_MIN: int = 2

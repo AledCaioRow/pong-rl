@@ -187,9 +187,9 @@ def main() -> None:
     parser.add_argument(
         "--rally-speedup-per-hit",
         type=float,
-        default=1.2,
-        help="Multiply ball speed after each paddle hit; cap grows with rally (default 1.2). "
-        "Use 1.0 for no escalation (training-like).",
+        default=cfg.RALLY_SPEEDUP_PER_HIT,
+        help=f"Multiply ball speed after each paddle hit (default {cfg.RALLY_SPEEDUP_PER_HIT} from config). "
+        f"Hard cap: {cfg.RALLY_SPEEDUP_VELOCITY_CAP_MULT}× normal max speed. Use 1.0 to disable.",
     )
     parser.add_argument(
         "--hold-steps",

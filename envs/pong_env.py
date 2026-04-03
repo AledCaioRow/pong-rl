@@ -58,8 +58,8 @@ class PongEnv(gym.Env):
         paddle_speed_scale: float = 1.0,
         # Scales cfg.BALL_INITIAL_SPEED / BALL_MAX_SPEED (human playtests; keep 1.0 for training).
         ball_speed_scale: float = 1.0,
-        # Multiply ball speed after each paddle bounce; 1.0 = legacy behaviour (training default).
-        rally_speedup_per_hit: float = 1.0,
+        # Multiply ball speed after each paddle bounce; None -> cfg.RALLY_SPEEDUP_PER_HIT.
+        rally_speedup_per_hit: Optional[float] = None,
     ) -> None:
         super().__init__()
         self.opponent = opponent
@@ -74,7 +74,15 @@ class PongEnv(gym.Env):
         _bs = max(0.05, float(ball_speed_scale))
         self._ball_initial_speed = float(cfg.BALL_INITIAL_SPEED * _bs)
         self._ball_max_speed = float(cfg.BALL_MAX_SPEED * _bs)
-        self._rally_speedup = float(rally_speedup_per_hit)
+        self._rally_speedup = float(
+            cfg.RALLY_SPEEDUP_PER_HIT if rally_speedup_per_hit is None else rally_speedup_per_hit
+        )
+        self._rally_vel_cap_mult = float(cfg.RALLY_SPEEDUP_VELOCITY_CAP_MULT)
+        self._v_obs_cap = (
+            self._ball_max_speed * self._rally_vel_cap_mult
+            if self._rally_speedup > 1.0 + 1e-12
+            else self._ball_max_speed
+        )
 
         low = np.array(
             [
@@ -145,10 +153,8 @@ class PongEnv(gym.Env):
         return self._rally_hits
 
     def _get_obs(self) -> np.ndarray:
-        # Normalize velocity; during rally speedup, |v| may exceed base _ball_max_speed.
-        sp = math.hypot(self.ball_vx, self.ball_vy)
-        norm_cap = max(self._ball_max_speed, sp)
-        nvx, nvy = _norm_v(self.ball_vx, self.ball_vy, norm_cap)
+        # Fixed cap for velocity normalization so scales match training (incl. 1.8× rally ceiling).
+        nvx, nvy = _norm_v(self.ball_vx, self.ball_vy, self._v_obs_cap)
         margin = self.agent_score - self.human_score
         return np.array(
             [
@@ -318,23 +324,28 @@ class PongEnv(gym.Env):
         self.ball_vy += offset * self._ball_initial_speed * 1.8
 
         speed = math.hypot(self.ball_vx, self.ball_vy)
-        cap = self._ball_max_speed
-        if speed > cap and speed > 1e-8:
-            s = cap / speed
-            self.ball_vx *= s
-            self.ball_vy *= s
+        su = self._rally_speedup
+        rally_on = su > 1.0 + 1e-12
+        # Without rally speedup, keep the legacy clamp to base max before counting the hit.
+        # With rally on, skip this clamp so speed can rise across returns; we only cap after ×su.
+        if not rally_on:
+            cap = self._ball_max_speed
+            if speed > cap and speed > 1e-8:
+                s = cap / speed
+                self.ball_vx *= s
+                self.ball_vy *= s
+        speed = math.hypot(self.ball_vx, self.ball_vy)
         if speed < self._ball_initial_speed * 0.35 and speed > 0:
             s = (self._ball_initial_speed * 0.5) / speed
             self.ball_vx *= s
             self.ball_vy *= s
 
         self._rally_hits += 1
-        if self._rally_speedup > 1.0 + 1e-12:
-            su = self._rally_speedup
+        if rally_on:
             self.ball_vx *= su
             self.ball_vy *= su
             rel = su ** self._rally_hits
-            cap_eff = self._ball_max_speed * min(rel, float(cfg.RALLY_SPEEDUP_MAX_REL_MULT))
+            cap_eff = self._ball_max_speed * min(rel, self._rally_vel_cap_mult)
             speed2 = math.hypot(self.ball_vx, self.ball_vy)
             if speed2 > cap_eff and speed2 > 1e-8:
                 s2 = cap_eff / speed2
