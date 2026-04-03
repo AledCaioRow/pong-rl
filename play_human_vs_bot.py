@@ -4,10 +4,13 @@ Tkinter human playtest — copy/paste (PowerShell):
     Set-Location "c:\\Users\\aled_\\Downloads\\Pong RL"
     py play_human_vs_bot.py
     py play_human_vs_bot.py --model models/pong_competent.zip
+    
     py play_human_vs_bot.py --no-auto-pair --model models/pong_competent.zip
     py play_human_vs_bot.py --profile pingponger
+    py play_human_vs_bot.py --no-auto-pair --profile pingponger   # strict: profile model(s) only
 
-First `--profile` run creates that folder and `profile.json` (edit `"model"` to your `.zip`).
+First `--profile` run creates that folder and `profile.json` (edit `"model"` to your `.zip`;
+optional `"no_auto_pair": true` skips phase pairing and the models/*.zip merge for that run).
 
 `py play_human_vs_bot.py --help`
 """
@@ -75,6 +78,14 @@ class CheckpointSlot:
     display_name: str
 
 
+@dataclass(frozen=True)
+class LoadedProfile:
+    """Profile JSON → checkpoint slot plus optional play preferences."""
+
+    slot: CheckpointSlot
+    no_auto_pair: bool
+
+
 def _as_zip_path(p: Path) -> Path:
     return p if p.suffix.lower() == ".zip" else p.with_suffix(".zip")
 
@@ -88,7 +99,7 @@ def _validate_profile_slug(slug: str) -> None:
             raise ValueError(f'Profile name cannot contain {c}: {slug!r}')
 
 
-def load_profile_slot(profiles_root: Path, slug: str) -> CheckpointSlot:
+def load_profile_slot(profiles_root: Path, slug: str) -> LoadedProfile:
     """Load `<profiles_root>/<slug>/profile.json`; create a starter file if missing."""
     _validate_profile_slug(slug)
     folder = profiles_root / slug.strip()
@@ -116,7 +127,17 @@ def load_profile_slot(profiles_root: Path, slug: str) -> CheckpointSlot:
         display = label_raw.strip()
     else:
         display = slug.strip()
-    return CheckpointSlot(path=path, display_name=display)
+    nap_raw = data.get("no_auto_pair")
+    if nap_raw is None:
+        no_auto_pair = False
+    elif isinstance(nap_raw, bool):
+        no_auto_pair = nap_raw
+    else:
+        raise ValueError(
+            f'{cfg_path} key "no_auto_pair" must be a boolean if present (got {type(nap_raw).__name__}).'
+        )
+    slot = CheckpointSlot(path=path, display_name=display)
+    return LoadedProfile(slot=slot, no_auto_pair=no_auto_pair)
 
 
 def main() -> None:
@@ -182,7 +203,8 @@ def main() -> None:
         default=None,
         help=(
             "In-game nickname: player_profiles/<NAME>/profile.json (auto-created with a default "
-            'model path if missing; edit JSON keys "model" and optional "label").'
+            'model path if missing; edit JSON keys "model", optional "label", optional '
+            'boolean "no_auto_pair" to skip phase pairing / models/*.zip merge).'
         ),
     )
     parser.add_argument(
@@ -215,17 +237,19 @@ def main() -> None:
         p = Path(s)
         add_slot(p, p.name)
 
+    no_auto_pair = bool(args.no_auto_pair)
     for slug in args.profile_slugs or []:
         try:
-            slot = load_profile_slot(profiles_root, slug)
+            loaded = load_profile_slot(profiles_root, slug)
         except (FileNotFoundError, ValueError) as e:
             _safe_eprint(str(e))
             raise SystemExit(1) from None
-        add_slot(slot.path, slot.display_name)
+        no_auto_pair = no_auto_pair or loaded.no_auto_pair
+        add_slot(loaded.slot.path, loaded.slot.display_name)
 
     if (
         len(checkpoints) == 1
-        and not args.no_auto_pair
+        and not no_auto_pair
     ):
         user_r = checkpoints[0].path.resolve()
         for rel in (cfg.PHASE2_MODEL_PATH, cfg.PHASE1_MODEL_PATH):
@@ -236,7 +260,7 @@ def main() -> None:
                 break
 
     # Any other checkpoints in models/ → same session can switch without listing each CLI path.
-    if checkpoints and not args.no_auto_pair:
+    if checkpoints and not no_auto_pair:
         models_dir = Path(_ROOT) / "models"
         if models_dir.is_dir():
             for p in sorted(models_dir.glob("*.zip"), key=lambda x: x.name.lower()):
