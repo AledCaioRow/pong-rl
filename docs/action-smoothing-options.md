@@ -45,6 +45,26 @@ This doc compares **when** to apply smoothing: before training, **as part of tra
 
 ---
 
+## Current implementation (Option D, enhanced)
+
+`envs/smooth_action_wrapper.py` implements **post-hoc inference-only** smoothing with three layers:
+
+| Lever | Config constant | Default | Effect |
+|-------|----------------|---------|--------|
+| **Base hold** | `ACTION_HOLD_STEPS` | 3 | Every action must be held this many frames before a different one is accepted. |
+| **Reversal penalty** | `ACTION_REVERSAL_HOLD_STEPS` | 8 (~133 ms at 60 FPS) | Switching between up (1) and down (2) requires extra hold time — humans can't physically reverse direction as fast as they can stop/start. |
+| **Random jitter** | `ACTION_HOLD_JITTER` | 3 | Each hold target gets 0 to `jitter` random extra frames so direction changes aren't metronomic. |
+
+Two forms:
+- **`SmoothActionWrapper`** — standard `gym.Wrapper`, used by `eval_agent.py` when `--hold-steps > 1`.
+- **`ActionSmoother`** — standalone callable, used in `play_human_vs_bot.py` for the human paddle when `--hold-steps > 1`.
+
+### Limitation: inference-only gap
+
+The agent trains without constraints and may learn strategies that rely on instant reversals. The wrapper then blocks those at play time, degrading performance. For stronger results, consider **training with the constraint** (Option A/B) so the policy learns strategies compatible with human-like motor limits, then optionally applying a slightly stricter version at inference.
+
+---
+
 ## What changes require retraining?
 
 - **Env dynamics or decision frequency** consistent across training → **yes**, new MDP (retrain or fine-tune from a compatible checkpoint).
