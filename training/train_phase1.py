@@ -6,9 +6,9 @@ Run from the project root, e.g.:
     python training/train_phase1.py --quick
     python training/train_phase1.py --timesteps 10000 --eval-games 5
 
-Monitoring UI: py -m pip install tensorboard
-    py -m tensorboard.main --logdir training/logs/phase1_ppo
-    (or: Scripts\\tensorboard.exe under your Python install if PATH is set)
+Monitoring (web UI): pip install -r requirements.txt
+    py -m tensorboard --logdir training/logs/phase1_ppo
+    Open http://localhost:6006 in a browser (second terminal while training runs).
 """
 
 from __future__ import annotations
@@ -30,14 +30,17 @@ from stable_baselines3.common.env_util import make_vec_env
 
 
 def _tensorboard_log(path: str | None, no_tensorboard: bool) -> str | None:
+    """Return log dir only if PyTorch can use TensorBoard (same check SB3 uses internally)."""
     if no_tensorboard or not path:
         return None
     try:
-        import tensorboard  # noqa: F401
+        from torch.utils.tensorboard import SummaryWriter
     except ImportError:
+        SummaryWriter = None  # type: ignore[misc, assignment]
+    if SummaryWriter is None:
         print(
-            "[warn] tensorboard not installed; training without TB logs. "
-            "Install: py -m pip install tensorboard"
+            "[warn] TensorBoard not available for PyTorch; training without TB logs. "
+            "Install: py -m pip install -r requirements.txt"
         )
         return None
     return path
@@ -109,6 +112,11 @@ def main() -> None:
         help="Disable TensorBoard logging.",
     )
     parser.add_argument(
+        "--no-progress-bar",
+        action="store_true",
+        help="Disable the tqdm/rich bar (includes estimated time remaining).",
+    )
+    parser.add_argument(
         "--eval-games",
         type=int,
         default=0,
@@ -125,13 +133,21 @@ def main() -> None:
 
     os.chdir(_ROOT)
 
+    tensorboard_log = _tensorboard_log(args.tensorboard, args.no_tensorboard)
+    if tensorboard_log:
+        log_abs = os.path.abspath(tensorboard_log)
+        print(
+            "\n[TensorBoard] Open the training dashboard in another terminal:\n"
+            f'  python -m tensorboard --logdir "{log_abs}"\n'
+            "  Then open http://localhost:6006 in your browser.\n"
+        )
+
     vec_env = make_vec_env(
         _make_pong,
         n_envs=args.n_envs,
         seed=args.seed,
     )
 
-    tensorboard_log = _tensorboard_log(args.tensorboard, args.no_tensorboard)
     model = PPO(
         "MlpPolicy",
         vec_env,
@@ -140,7 +156,10 @@ def main() -> None:
         verbose=1,
         tensorboard_log=tensorboard_log,
     )
-    model.learn(total_timesteps=args.timesteps)
+    model.learn(
+        total_timesteps=args.timesteps,
+        progress_bar=not args.no_progress_bar,
+    )
     model.save(args.model_path)
     print(f"Saved model to {args.model_path}.zip")
 
