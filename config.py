@@ -49,7 +49,13 @@ RULE_BASED_OPPONENT_TRACK_NOISE: float = 0.06
 
 # --- Action smoothing (Option D, inference-only; see envs/smooth_action_wrapper.py) ---
 # Minimum env steps the current discrete action is held before switching to another.
-ACTION_HOLD_STEPS: int = 2  # 1 = no smoothing (wrapper not applied in play_human when hold <= 1)
+ACTION_HOLD_STEPS: int = 3  # 1 = no smoothing (wrapper not applied in play_human when hold <= 1)
+# Extra hold for direction reversals (up↔down): the hardest transition for a human.
+# At 60 FPS, 8 frames ≈ 133 ms — still below typical human reaction time (~200 ms) but
+# enough to kill the instant-reversal zig-zag that screams "bot".
+ACTION_REVERSAL_HOLD_STEPS: int = 8
+# Random ±jitter frames added to every hold target so switches don't look metronomic.
+ACTION_HOLD_JITTER: int = 3
 
 # --- Phase 1 training defaults ---
 # Standard full Phase 1 run (train_phase1.py default when --timesteps omitted).
