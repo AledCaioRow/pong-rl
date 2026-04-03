@@ -160,8 +160,8 @@ def main() -> None:
     parser.add_argument(
         "--ball-speed-scale",
         type=float,
-        default=1.0,
-        help="Ball speed scale (default 1.0 = shared baseline).",
+        default=0.68,
+        help="Ball speed scale (default 0.68 = slower for human play; 1.0 = training baseline).",
     )
     parser.add_argument(
         "--hold-steps",
@@ -346,12 +346,13 @@ def main() -> None:
         assert isinstance(c, PongEnv)
 
         def to_cx(x: float) -> float:
-            # Map court x to the rectangular field width.
-            return field_left_px + (x * field_w_px)
+            # Court x is in [0, COURT_WIDTH] (config may use width > 1).
+            nx = float(x) / max(cfg.COURT_WIDTH, 1e-6)
+            return field_left_px + nx * field_w_px
 
         def to_cy(y: float) -> float:
-            # Map court y to the rectangular field height.
-            return field_top_px + ((1.0 - y) * field_h_px)
+            ny = float(y) / max(cfg.COURT_HEIGHT, 1e-6)
+            return field_top_px + ((1.0 - ny) * field_h_px)
 
         # Minimal classic Pong field.
         canvas.create_rectangle(
@@ -382,9 +383,11 @@ def main() -> None:
             dash=(9, 12),
         )
 
-        half_w = cfg.PADDLE_HALF_WIDTH * field_w_px
-        half_h = cfg.PADDLE_HALF_HEIGHT * field_h_px
-        br = cfg.BALL_RADIUS * min(field_w_px, field_h_px)
+        px_per_cx = field_w_px / max(cfg.COURT_WIDTH, 1e-6)
+        px_per_cy = field_h_px / max(cfg.COURT_HEIGHT, 1e-6)
+        half_w = cfg.PADDLE_HALF_WIDTH * px_per_cx
+        half_h = cfg.PADDLE_HALF_HEIGHT * px_per_cy
+        br = cfg.BALL_RADIUS * min(px_per_cx, px_per_cy)
 
         bx, by = to_cx(c.ball_x), to_cy(c.ball_y)
         half_ball_w = br * 0.48
@@ -438,18 +441,20 @@ def main() -> None:
 
     btn_font = tkfont.Font(family="Segoe UI", size=10, weight="bold")
     hint_font = tkfont.Font(family="Segoe UI", size=9)
-    opponent_hint_var = tk.StringVar(value="")
+    title_font = tkfont.Font(family="Segoe UI", size=18, weight="bold")
+    model_title_var = tk.StringVar(value="")
+    switch_hint_var = tk.StringVar(value="")
 
-    def refresh_opponent_hint() -> None:
+    def refresh_model_header() -> None:
         if not vs_ppo or not checkpoints:
+            model_title_var.set("")
+            switch_hint_var.set("")
             return
-        name = checkpoints[model_index].display_name
+        model_title_var.set(checkpoints[model_index].display_name)
         if len(checkpoints) > 1:
-            opponent_hint_var.set(f"Opponent: {name} · M / buttons = switch")
+            switch_hint_var.set("M or buttons — switch checkpoint")
         else:
-            opponent_hint_var.set(
-                f"Opponent: {name} — add another .zip under models/ or use --profile / --model"
-            )
+            switch_hint_var.set("")
 
     def cycle_model(delta: int) -> None:
         nonlocal model, obs, done, model_index
@@ -464,67 +469,84 @@ def main() -> None:
         if human_smoother is not None:
             human_smoother.reset()
         root.title(window_title())
-        refresh_opponent_hint()
+        refresh_model_header()
         redraw()
 
-    model_bar = tk.Frame(root, bg="#000000", pady=6, padx=4)
+    top_bar = tk.Frame(root, bg="#0d0d12", padx=8, pady=10)
     if vs_ppo:
         multi_ckpt = len(checkpoints) > 1
-        model_bar.pack(fill="x", side=tk.TOP)
-        refresh_opponent_hint()
+        top_bar.pack(fill="x", side=tk.TOP)
+        refresh_model_header()
 
-        def _btn(**kw: object) -> tk.Button:
-            b = tk.Button(model_bar, **kw)
-            try:
-                b.configure(
-                    relief=tk.RAISED,
-                    borderwidth=2,
-                    highlightthickness=1,
-                    highlightbackground="#606078",
-                )
-            except tk.TclError:
-                pass
-            return b
-
-        prev_b = _btn(
-            text="◀  Previous model",
-            command=lambda: cycle_model(-1),
-            font=btn_font,
-            bg="#1a1a1a",
-            fg="#ffffff",
-            activebackground="#2a2a2a",
-            activeforeground="#ffffff",
-            padx=14,
-            pady=8,
-            cursor="hand2" if multi_ckpt else "arrow",
-            takefocus=True,
-            state=tk.NORMAL if multi_ckpt else tk.DISABLED,
-        )
-        prev_b.pack(side=tk.LEFT, padx=(4, 8))
         tk.Label(
-            model_bar,
-            textvariable=opponent_hint_var,
-            bg="#000000",
-            fg="#d0d0d0",
+            top_bar,
+            text="Opponent model",
+            bg="#0d0d12",
+            fg="#888898",
             font=hint_font,
-        ).pack(side=tk.LEFT, expand=True)
-        next_b = _btn(
-            text="Next model  ▶",
-            command=lambda: cycle_model(1),
-            font=btn_font,
-            bg="#1a1a1a",
-            fg="#ffffff",
-            activebackground="#2a2a2a",
-            activeforeground="#ffffff",
-            padx=14,
-            pady=8,
-            cursor="hand2" if multi_ckpt else "arrow",
-            takefocus=True,
-            state=tk.NORMAL if multi_ckpt else tk.DISABLED,
-        )
-        next_b.pack(side=tk.RIGHT, padx=(8, 4))
+        ).pack(anchor="center")
+        tk.Label(
+            top_bar,
+            textvariable=model_title_var,
+            bg="#0d0d12",
+            fg="#f2f2f2",
+            font=title_font,
+            pady=2,
+        ).pack(anchor="center")
 
-    canvas.pack()
+        if multi_ckpt:
+            nav = tk.Frame(top_bar, bg="#0d0d12", pady=10)
+            nav.pack(fill="x")
+            nav.columnconfigure(1, weight=1)
+
+            def _btn(**kw: object) -> tk.Button:
+                b = tk.Button(nav, **kw)
+                try:
+                    b.configure(
+                        relief=tk.RAISED,
+                        borderwidth=2,
+                        highlightthickness=1,
+                        highlightbackground="#606078",
+                    )
+                except tk.TclError:
+                    pass
+                return b
+
+            _btn(
+                text="◀  Previous model",
+                command=lambda: cycle_model(-1),
+                font=btn_font,
+                bg="#1a1a1a",
+                fg="#ffffff",
+                activebackground="#2a2a2a",
+                activeforeground="#ffffff",
+                padx=14,
+                pady=8,
+                cursor="hand2",
+                takefocus=True,
+            ).grid(row=0, column=0, sticky="w", padx=(0, 8))
+            tk.Label(
+                nav,
+                textvariable=switch_hint_var,
+                bg="#0d0d12",
+                fg="#a8a8b8",
+                font=hint_font,
+            ).grid(row=0, column=1, sticky="")
+            _btn(
+                text="Next model  ▶",
+                command=lambda: cycle_model(1),
+                font=btn_font,
+                bg="#1a1a1a",
+                fg="#ffffff",
+                activebackground="#2a2a2a",
+                activeforeground="#ffffff",
+                padx=14,
+                pady=8,
+                cursor="hand2",
+                takefocus=True,
+            ).grid(row=0, column=2, sticky="e", padx=(8, 0))
+
+    canvas.pack(fill="both", expand=True)
 
     def action_for_mouse(target_y: float) -> int:
         c = env.unwrapped
@@ -604,7 +626,7 @@ def main() -> None:
         assert isinstance(c, PongEnv)
         y_px = min(max(float(e.y), field_top_px), field_bottom_px)
         y_rel = (y_px - field_top_px) / max(1.0, field_h_px)
-        y_court = 1.0 - y_rel
+        y_court = (1.0 - y_rel) * cfg.COURT_HEIGHT
         y_court = max(c._paddle_min_y, min(c._paddle_max_y, y_court))
         mouse_target_y = y_court
 
