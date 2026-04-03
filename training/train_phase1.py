@@ -1,6 +1,8 @@
 """
 Phase 1: train a competent PPO agent against the rule-based opponent (spec).
 
+Default run (no --quick): 2,000,000 timesteps from config.PHASE1_TOTAL_TIMESTEPS.
+
 Run from the project root, e.g.:
     python training/train_phase1.py
         (without --model-path you are prompted for a save name; --quick skips the prompt and uses config default)
@@ -93,7 +95,10 @@ def main() -> None:
         "--timesteps",
         type=int,
         default=cfg.PHASE1_TOTAL_TIMESTEPS,
-        help="Total environment steps across all parallel envs.",
+        help=(
+            "Total environment steps across all parallel envs. "
+            f"Default {cfg.PHASE1_TOTAL_TIMESTEPS:,} (Phase 1 full run)."
+        ),
     )
     parser.add_argument(
         "--quick",

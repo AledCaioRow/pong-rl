@@ -52,6 +52,7 @@ RULE_BASED_OPPONENT_TRACK_NOISE: float = 0.06
 ACTION_HOLD_STEPS: int = 2  # 1 = no smoothing (wrapper not applied in play_human when hold <= 1)
 
 # --- Phase 1 training defaults ---
+# Standard full Phase 1 run (train_phase1.py default when --timesteps omitted).
 PHASE1_TOTAL_TIMESTEPS: int = 2_000_000
 # Smoke / “~10 min” run (use training/train_phase1.py --quick); wall time varies by CPU.
 PHASE1_QUICK_TIMESTEPS: int = 900_000
