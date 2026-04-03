@@ -82,6 +82,16 @@ play_human_vs_bot.py      ← Human vs bot (playtest; optional slower ball/paddl
 
 ---
 
+## `evaluation/` — headless metrics
+
+| File | Purpose |
+|------|---------|
+| **`eval_agent.py`** | Load `PPO` `.zip`, run **`--games`** full episodes (`--phase` 1 or 2), optional **`SmoothActionWrapper`** via `--hold-steps`, JSON to **`--out`**. |
+| **`eval_report.py`** | Summarize one JSON (`--input`) or **`--compare`** two runs; `--format table\|json\|md`. |
+| **`results/`** | Output directory (gitignored). |
+
+---
+
 ## Typical commands
 
 ```powershell
@@ -91,6 +101,8 @@ py training/train_phase1.py --quick
 py training/train_phase2.py --quick
 py play_human_vs_bot.py
 py -m tensorboard.main --logdir training/logs/phase1_ppo
+py evaluation/eval_agent.py --model models/pong_competent.zip --phase 1 --games 50 --out evaluation/results/p1.json
+py evaluation/eval_report.py --input evaluation/results/p1.json
 ```
 
 ---
