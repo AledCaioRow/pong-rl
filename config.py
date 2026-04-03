@@ -65,6 +65,10 @@ PHASE2_LOAD_PATH: str = "models/pong_competent"
 # Rule-based opponent noise levels cycled randomly each episode (VecEnv-friendly mix).
 PHASE2_OPPONENT_NOISE_LEVELS: tuple[float, ...] = (0.04, 0.06, 0.09)
 
+# --- Evaluation (evaluation/eval_agent.py) ---
+EVAL_GAMES: int = 50
+EVAL_DETERMINISTIC: bool = True
+
 
 @dataclass(frozen=True)
 class TrainingConfig:

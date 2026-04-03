@@ -11,3 +11,5 @@ models/*.zip
 models/*.pkl
 
 training/logs/
+
+evaluation/results/
