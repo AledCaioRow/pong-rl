@@ -185,6 +185,13 @@ def main() -> None:
         help="Ball speed scale (default 0.68 = slower for human play; 1.0 = training baseline).",
     )
     parser.add_argument(
+        "--rally-speedup-per-hit",
+        type=float,
+        default=1.2,
+        help="Multiply ball speed after each paddle hit; cap grows with rally (default 1.2). "
+        "Use 1.0 for no escalation (training-like).",
+    )
+    parser.add_argument(
         "--hold-steps",
         type=int,
         default=cfg.ACTION_HOLD_STEPS,
@@ -305,6 +312,7 @@ def main() -> None:
             render_mode=None,
             paddle_speed_scale=args.paddle_speed_scale,
             ball_speed_scale=args.ball_speed_scale,
+            rally_speedup_per_hit=args.rally_speedup_per_hit,
         )
         env = base
         if args.hold_steps > 1:
@@ -317,6 +325,7 @@ def main() -> None:
             render_mode=None,
             paddle_speed_scale=args.paddle_speed_scale,
             ball_speed_scale=args.ball_speed_scale,
+            rally_speedup_per_hit=args.rally_speedup_per_hit,
         )
         env = base
         if args.hold_steps > 1:

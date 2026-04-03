@@ -58,6 +58,8 @@ class PongEnv(gym.Env):
         paddle_speed_scale: float = 1.0,
         # Scales cfg.BALL_INITIAL_SPEED / BALL_MAX_SPEED (human playtests; keep 1.0 for training).
         ball_speed_scale: float = 1.0,
+        # Multiply ball speed after each paddle bounce; 1.0 = legacy behaviour (training default).
+        rally_speedup_per_hit: float = 1.0,
     ) -> None:
         super().__init__()
         self.opponent = opponent
@@ -72,6 +74,7 @@ class PongEnv(gym.Env):
         _bs = max(0.05, float(ball_speed_scale))
         self._ball_initial_speed = float(cfg.BALL_INITIAL_SPEED * _bs)
         self._ball_max_speed = float(cfg.BALL_MAX_SPEED * _bs)
+        self._rally_speedup = float(rally_speedup_per_hit)
 
         low = np.array(
             [
@@ -142,8 +145,10 @@ class PongEnv(gym.Env):
         return self._rally_hits
 
     def _get_obs(self) -> np.ndarray:
-        # Match physics cap: ball_speed_scale uses self._ball_max_speed, so normalize with the same.
-        nvx, nvy = _norm_v(self.ball_vx, self.ball_vy, self._ball_max_speed)
+        # Normalize velocity; during rally speedup, |v| may exceed base _ball_max_speed.
+        sp = math.hypot(self.ball_vx, self.ball_vy)
+        norm_cap = max(self._ball_max_speed, sp)
+        nvx, nvy = _norm_v(self.ball_vx, self.ball_vy, norm_cap)
         margin = self.agent_score - self.human_score
         return np.array(
             [
@@ -324,6 +329,17 @@ class PongEnv(gym.Env):
             self.ball_vy *= s
 
         self._rally_hits += 1
+        if self._rally_speedup > 1.0 + 1e-12:
+            su = self._rally_speedup
+            self.ball_vx *= su
+            self.ball_vy *= su
+            rel = su ** self._rally_hits
+            cap_eff = self._ball_max_speed * min(rel, float(cfg.RALLY_SPEEDUP_MAX_REL_MULT))
+            speed2 = math.hypot(self.ball_vx, self.ball_vy)
+            if speed2 > cap_eff and speed2 > 1e-8:
+                s2 = cap_eff / speed2
+                self.ball_vx *= s2
+                self.ball_vy *= s2
 
     def _respawn_ball(self, *, favor_side: Literal["agent", "human"]) -> None:
         rng = self.np_random

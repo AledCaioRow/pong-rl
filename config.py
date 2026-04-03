@@ -33,6 +33,11 @@ BALL_INITIAL_SPEED: float = 0.022
 # Used to map ball_vx, ball_vy into approximately [-1, 1] in the observation vector.
 BALL_MAX_SPEED: float = 0.072
 
+# After each paddle hit, ball speed is multiplied by this factor (then clipped); cap grows as
+# BALL_MAX_SPEED * min(factor**hits, RALLY_SPEEDUP_MAX_REL_MULT). Use 1.0 for training.
+# Human playtests often use ~1.2 for longer rallies that eventually outpace reaction time.
+RALLY_SPEEDUP_MAX_REL_MULT: float = 30.0
+
 # --- Observation / reward placeholders (Phase 2+) ---
 TARGET_MARGIN_MIN: int = 2
 TARGET_MARGIN_MAX: int = 20
