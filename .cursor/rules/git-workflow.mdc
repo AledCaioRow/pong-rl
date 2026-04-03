@@ -1,0 +1,13 @@
+---
+description: After each implementation step, commit with a short description and push to GitHub.
+alwaysApply: true
+---
+
+# Git workflow (Pong RL)
+
+After completing each logical **step** or milestone in this project:
+
+1. **Commit** with a **short, clear message** that describes what changed (what the step accomplished), not just "update files."
+2. **Push** to `origin` (e.g. `git push`) so GitHub stays in sync.
+
+If the step is tiny or purely cosmetic, one commit per step is fine; avoid leaving the remote several steps behind.
