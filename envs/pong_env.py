@@ -23,9 +23,11 @@ def _clamp(y: float, lo: float, hi: float) -> float:
     return float(np.clip(y, lo, hi))
 
 
-def _norm_v(vx: float, vy: float) -> Tuple[float, float]:
-    """Map velocities into approximately [-1, 1] using cfg.BALL_MAX_SPEED."""
-    cap = cfg.BALL_MAX_SPEED if cfg.BALL_MAX_SPEED > 0 else 1e-6
+def _norm_v(vx: float, vy: float, speed_cap: float | None = None) -> Tuple[float, float]:
+    """Map velocities into [-1, 1] using `speed_cap` (defaults to cfg.BALL_MAX_SPEED)."""
+    cap = float(cfg.BALL_MAX_SPEED if speed_cap is None else speed_cap)
+    if cap <= 0:
+        cap = 1e-6
     return float(np.clip(vx / cap, -1.0, 1.0)), float(np.clip(vy / cap, -1.0, 1.0))
 
 
@@ -137,7 +139,8 @@ class PongEnv(gym.Env):
         return self._rally_hits
 
     def _get_obs(self) -> np.ndarray:
-        nvx, nvy = _norm_v(self.ball_vx, self.ball_vy)
+        # Match physics cap: ball_speed_scale uses self._ball_max_speed, so normalize with the same.
+        nvx, nvy = _norm_v(self.ball_vx, self.ball_vy, self._ball_max_speed)
         margin = self.agent_score - self.human_score
         return np.array(
             [
