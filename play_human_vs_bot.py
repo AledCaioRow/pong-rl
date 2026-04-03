@@ -39,12 +39,20 @@ Also from project root with `python`:
   Use `--no-auto-pair` to disable merging extra `models/*.zip`. With 2+ loaded checkpoints,
   use **Previous model** / **Next model** or **M**. The window uses a wide layout with a centered
   rectangular playfield.
+
+Pseudonym profiles (friendly in-game name vs technical model path): create a folder
+`player_profiles/<your_name>/profile.json` with `{"model": "models/V1 P1 only.zip"}`.
+The window title and toolbar show the folder name (or optional `"label"` in JSON). Run e.g.:
+    py play_human_vs_bot.py --profile pingponger
+    py play_human_vs_bot.py --profile pingponger --model models/pong_margin_targeting.zip
 """
 
 from __future__ import annotations
 
+import json
 import os
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 _ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -92,6 +100,49 @@ def _safe_eprint(*args: object, **kwargs: object) -> None:
         print(*args, **kwargs)
     except (OSError, TypeError, UnicodeEncodeError):
         pass
+
+
+@dataclass(frozen=True)
+class CheckpointSlot:
+    """PPO checkpoint path plus the name shown in the UI (pseudonym or filename)."""
+
+    path: Path
+    display_name: str
+
+
+def _as_zip_path(p: Path) -> Path:
+    return p if p.suffix.lower() == ".zip" else p.with_suffix(".zip")
+
+
+def load_profile_slot(profiles_root: Path, slug: str) -> CheckpointSlot:
+    """Load `player_profiles/<slug>/profile.json` → checkpoint path and display label."""
+    folder = profiles_root / slug
+    if not folder.is_dir():
+        raise FileNotFoundError(
+            f"Profile folder not found: {folder} — create it and add profile.json "
+            f'with a "model" path (see module docstring).'
+        )
+    cfg_path = folder / "profile.json"
+    if not cfg_path.is_file():
+        raise FileNotFoundError(
+            f"Missing {cfg_path} — add JSON with a \"model\" key pointing at your .zip."
+        )
+    try:
+        data = json.loads(cfg_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON in {cfg_path}: {e}") from e
+    if not isinstance(data, dict):
+        raise ValueError(f"{cfg_path} must be a JSON object.")
+    raw_model = data.get("model")
+    if not isinstance(raw_model, str) or not raw_model.strip():
+        raise ValueError(f'{cfg_path} must include a non-empty string "model" path.')
+    path = _as_zip_path(Path(raw_model.strip()))
+    label_raw = data.get("label")
+    if isinstance(label_raw, str) and label_raw.strip():
+        display = label_raw.strip()
+    else:
+        display = slug
+    return CheckpointSlot(path=path, display_name=display)
 
 
 def main() -> None:
@@ -149,56 +200,85 @@ def main() -> None:
         action="store_true",
         help="Only load paths you pass: no phase-2 pairing, no extra models/*.zip merge.",
     )
+    parser.add_argument(
+        "--profile",
+        action="append",
+        dest="profile_slugs",
+        metavar="NAME",
+        default=None,
+        help=(
+            "Load player_profiles/<NAME>/profile.json: \"model\" points at the real .zip; "
+            "UI shows folder name or JSON \"label\"."
+        ),
+    )
+    parser.add_argument(
+        "--profiles-dir",
+        type=str,
+        default="player_profiles",
+        help="Root directory for --profile folders (default: player_profiles).",
+    )
     args = parser.parse_args()
 
     os.chdir(_ROOT)
 
-    def _as_zip(p: Path) -> Path:
-        return p if p.suffix.lower() == ".zip" else p.with_suffix(".zip")
+    profiles_root = Path(args.profiles_dir)
+    if not profiles_root.is_absolute():
+        profiles_root = Path(_ROOT) / profiles_root
 
-    raw_paths = args.model_paths or []
-    model_paths: list[Path] = []
+    checkpoints: list[CheckpointSlot] = []
     seen_resolved: set[Path] = set()
-    for s in raw_paths:
-        p = Path(s)
+
+    def add_slot(path: Path, display_name: str) -> None:
+        p = _as_zip_path(path)
         r = p.resolve()
         if r in seen_resolved:
-            continue
+            return
         seen_resolved.add(r)
-        model_paths.append(p)
+        checkpoints.append(CheckpointSlot(path=p, display_name=display_name))
+
+    raw_paths = args.model_paths or []
+    for s in raw_paths:
+        p = Path(s)
+        add_slot(p, p.name)
+
+    for slug in args.profile_slugs or []:
+        try:
+            slot = load_profile_slot(profiles_root, slug)
+        except (FileNotFoundError, ValueError) as e:
+            _safe_eprint(str(e))
+            raise SystemExit(1) from None
+        add_slot(slot.path, slot.display_name)
 
     if (
-        len(model_paths) == 1
+        len(checkpoints) == 1
         and not args.no_auto_pair
     ):
-        user_r = model_paths[0].resolve()
+        user_r = checkpoints[0].path.resolve()
         for rel in (cfg.PHASE2_MODEL_PATH, cfg.PHASE1_MODEL_PATH):
-            cand = _as_zip(Path(rel))
+            cand = _as_zip_path(Path(rel))
             cr = cand.resolve()
             if cr != user_r and cand.is_file():
-                seen_resolved.add(cr)
-                model_paths.append(cand)
+                add_slot(cand, cand.name)
                 break
 
     # Any other checkpoints in models/ → same session can switch without listing each CLI path.
-    if model_paths and not args.no_auto_pair:
+    if checkpoints and not args.no_auto_pair:
         models_dir = Path(_ROOT) / "models"
         if models_dir.is_dir():
             for p in sorted(models_dir.glob("*.zip"), key=lambda x: x.name.lower()):
-                r = p.resolve()
-                if r not in seen_resolved:
-                    seen_resolved.add(r)
-                    model_paths.append(p)
+                add_slot(p, p.name)
 
-    vs_ppo = len(model_paths) > 0
+    vs_ppo = len(checkpoints) > 0
     if vs_ppo:
-        n_m = len(model_paths)
+        n_m = len(checkpoints)
+        for i, ck in enumerate(checkpoints):
+            _safe_print(f"[play] [{i + 1}/{n_m}] {ck.display_name} ← {ck.path}")
         _safe_print(
             f"[play] PPO mode: {n_m} checkpoint(s). "
             + (
                 "Use the top bar or M to switch."
                 if n_m > 1
-                else "Only one .zip — add another under models/ or pass --model twice."
+                else "Only one .zip — add another under models/ or use --profile / --model."
             ),
         )
     else:
@@ -211,9 +291,9 @@ def main() -> None:
     model_index = 0
 
     if vs_ppo:
-        for p in model_paths:
-            if not p.is_file():
-                _safe_eprint(f"Model not found: {p.resolve()}")
+        for ck in checkpoints:
+            if not ck.path.is_file():
+                _safe_eprint(f"Model not found: {ck.path.resolve()} (profile or --model)")
                 sys.exit(1)
         if args.opponent != "rule_based":
             _safe_print(
@@ -221,7 +301,7 @@ def main() -> None:
             )
         from stable_baselines3 import PPO
 
-        model = PPO.load(str(model_paths[model_index]))
+        model = PPO.load(str(checkpoints[model_index].path))
         base = PongEnv(
             opponent="keyboard",
             render_mode=None,
@@ -262,8 +342,8 @@ def main() -> None:
 
     def window_title() -> str:
         t = "Pong RL — PPO vs human" if vs_ppo else "Pong RL — human vs bot"
-        if vs_ppo and model_paths:
-            t = f"{t} ({model_paths[model_index].name})"
+        if vs_ppo and checkpoints:
+            t = f"{t} ({checkpoints[model_index].display_name})"
         return t
 
     root.title(window_title())
@@ -382,32 +462,42 @@ def main() -> None:
                 font=("Consolas", 12, "bold"),
             )
 
+    btn_font = tkfont.Font(family="Segoe UI", size=10, weight="bold")
+    hint_font = tkfont.Font(family="Segoe UI", size=9)
+    opponent_hint_var = tk.StringVar(value="")
+
+    def refresh_opponent_hint() -> None:
+        if not vs_ppo or not checkpoints:
+            return
+        name = checkpoints[model_index].display_name
+        if len(checkpoints) > 1:
+            opponent_hint_var.set(f"Opponent: {name} · M / buttons = switch")
+        else:
+            opponent_hint_var.set(
+                f"Opponent: {name} — add another .zip under models/ or use --profile / --model"
+            )
+
     def cycle_model(delta: int) -> None:
         nonlocal model, obs, done, model_index
-        if not vs_ppo or len(model_paths) < 2:
+        if not vs_ppo or len(checkpoints) < 2:
             return
         from stable_baselines3 import PPO
 
-        model_index = (model_index + delta) % len(model_paths)
-        model = PPO.load(str(model_paths[model_index]))
+        model_index = (model_index + delta) % len(checkpoints)
+        model = PPO.load(str(checkpoints[model_index].path))
         obs, _ = env.reset(seed=args.seed)
         done = False
         if human_smoother is not None:
             human_smoother.reset()
         root.title(window_title())
+        refresh_opponent_hint()
         redraw()
 
-    btn_font = tkfont.Font(family="Segoe UI", size=10, weight="bold")
-    hint_font = tkfont.Font(family="Segoe UI", size=9)
     model_bar = tk.Frame(root, bg="#000000", pady=6, padx=4)
     if vs_ppo:
-        multi_ckpt = len(model_paths) > 1
+        multi_ckpt = len(checkpoints) > 1
         model_bar.pack(fill="x", side=tk.TOP)
-        hint = (
-            "Switch PPO · M = next"
-            if multi_ckpt
-            else "Need 2+ .zip in models/ (or --model A --model B) to switch"
-        )
+        refresh_opponent_hint()
 
         def _btn(**kw: object) -> tk.Button:
             b = tk.Button(model_bar, **kw)
@@ -439,7 +529,7 @@ def main() -> None:
         prev_b.pack(side=tk.LEFT, padx=(4, 8))
         tk.Label(
             model_bar,
-            text=hint,
+            textvariable=opponent_hint_var,
             bg="#000000",
             fg="#d0d0d0",
             font=hint_font,
@@ -558,7 +648,7 @@ def main() -> None:
                 human_smoother.reset()
             redraw()
             return
-        if vs_ppo and len(model_paths) > 1 and ks in ("m", "M"):
+        if vs_ppo and len(checkpoints) > 1 and ks in ("m", "M"):
             cycle_model(1)
             return
         if control_mode == "keys":
