@@ -16,7 +16,8 @@ from gymnasium import spaces
 
 import config as cfg
 
-OpponentType = Literal["rule_based", "idle"]
+# "keyboard" = left paddle from external discrete actions (human vs PPO).
+OpponentType = Literal["rule_based", "idle", "keyboard"]
 
 
 def _clamp(y: float, lo: float, hi: float) -> float:
@@ -190,19 +191,27 @@ class PongEnv(gym.Env):
         return self._get_obs(), {}
 
     def step(
-        self, action: int | np.ndarray
+        self,
+        action: int | np.ndarray,
+        *,
+        human_action: int | np.ndarray | None = None,
     ) -> Tuple[np.ndarray, SupportsFloat, bool, bool, dict[str, Any]]:
         a = int(action) if not isinstance(action, int) else action
         reward = 0.0
         terminated = False
         info: dict[str, Any] = {}
 
-        # --- Agent paddle ---
+        # --- Agent paddle (right) ---
         self._move_agent(a)
 
-        # --- Opponent paddle ---
+        # --- Left paddle ---
         if self.opponent == "idle":
             pass
+        elif self.opponent == "keyboard":
+            if human_action is None:
+                raise ValueError("opponent='keyboard' requires human_action= each step.")
+            ha = int(human_action) if not isinstance(human_action, int) else human_action
+            self._move_human_paddle(ha)
         else:
             rng = self.np_random
             noise = (
@@ -258,6 +267,15 @@ class PongEnv(gym.Env):
         elif action == 2:
             y -= self._paddle_speed
         self.agent_y = _clamp(y, self._paddle_min_y, self._paddle_max_y)
+
+    def _move_human_paddle(self, action: int) -> None:
+        """Same action semantics as `_move_agent`, for the left paddle."""
+        y = self.human_y
+        if action == 1:
+            y += self._paddle_speed
+        elif action == 2:
+            y -= self._paddle_speed
+        self.human_y = _clamp(y, self._paddle_min_y, self._paddle_max_y)
 
     def _move_paddle_towards(self, _: float, target_y: float, *, attr: str) -> None:
         y = self.human_y if attr == "human" else self.agent_y

@@ -44,7 +44,9 @@ class SmoothActionWrapper(gym.Wrapper):
         return self.env.reset(seed=seed, options=options)
 
     def step(
-        self, action: int | np.ndarray
+        self,
+        action: int | np.ndarray,
+        **kwargs: Any,
     ) -> Tuple[np.ndarray, SupportsFloat, bool, bool, dict[str, Any]]:
         a = int(action) if not isinstance(action, int) else action
         if self._current_action is None:
@@ -58,7 +60,7 @@ class SmoothActionWrapper(gym.Wrapper):
         else:
             self._steps_held += 1
         assert self._current_action is not None
-        return self.env.step(self._current_action)
+        return self.env.step(self._current_action, **kwargs)
 
 
 class ActionSmoother:

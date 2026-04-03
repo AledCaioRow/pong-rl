@@ -6,9 +6,10 @@ Run from the project root, e.g.:
     python training/train_phase1.py --quick
     python training/train_phase1.py --timesteps 10000 --eval-games 5
 
-Monitoring (web UI): pip install -r requirements.txt
-    py -m tensorboard --logdir training/logs/phase1_ppo
-    Open http://localhost:6006 in a browser (second terminal while training runs).
+TensorBoard (separate terminal from training — it does not open automatically):
+    py -m pip install -r requirements.txt
+    py -m tensorboard.main --logdir training/logs/phase1_ppo --port 6006
+    Browser: http://127.0.0.1:6006  (if that fails, try http://localhost:6006)
 """
 
 from __future__ import annotations
@@ -137,9 +138,10 @@ def main() -> None:
     if tensorboard_log:
         log_abs = os.path.abspath(tensorboard_log)
         print(
-            "\n[TensorBoard] Open the training dashboard in another terminal:\n"
-            f'  python -m tensorboard --logdir "{log_abs}"\n'
-            "  Then open http://localhost:6006 in your browser.\n"
+            "\n[TensorBoard] Start in a **separate** terminal and leave it open "
+            "(nothing listens on :6006 until you run this — ERR_CONNECTION_REFUSED means it is not running):\n"
+            f'  py -m tensorboard.main --logdir "{log_abs}" --host 127.0.0.1 --port 6006\n'
+            "  Then http://127.0.0.1:6006/ — if Cursor’s Simple Browser fails, use Chrome or Edge.\n"
         )
 
     vec_env = make_vec_env(
