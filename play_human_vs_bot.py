@@ -27,7 +27,7 @@ Multiple explicit paths (merge still adds any other `models/*.zip` unless you pa
 Two modes:
 - **Default:** you control the **right** paddle vs rule-based (or idle) bot on the **left**
   (same sides as Phase 1 training, but you substitute for the RL policy).
-- **With --model:** load a PPO ``.zip``; you control the **left** paddle vs the policy on the **right**
+- **With --model:** load a PPO `.zip`; you control the **left** paddle vs the policy on the **right**
   (matches how the network was trained: agent = right).
 
 Click the court to toggle **KEYS** ↔ **MOUSE**. Optional `--hold-steps` applies action hold
