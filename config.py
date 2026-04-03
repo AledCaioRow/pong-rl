@@ -37,11 +37,26 @@ BALL_MAX_SPEED: float = 0.06
 TARGET_MARGIN_MIN: int = 2
 TARGET_MARGIN_MAX: int = 20
 
+# --- Phase 1 opponent (rule-based; same physics as agent) ---
+# Gaussian noise (court height units) on the opponent's ball-y target each step.
+RULE_BASED_OPPONENT_TRACK_NOISE: float = 0.06
+
 # --- Phase 1 training defaults ---
 PHASE1_TOTAL_TIMESTEPS: int = 2_000_000
 PHASE1_N_ENVS: int = 4
 PHASE1_LEARNING_RATE: float = 3e-4
+PHASE1_MODEL_PATH: str = "models/pong_competent"
 SEED: int = 42
+
+# --- Phase 2 margin targeting (fine-tune from Phase 1 checkpoint) ---
+PHASE2_TOTAL_TIMESTEPS: int = 5_000_000
+PHASE2_N_ENVS: int = 4
+# Slightly lower LR for fine-tuning on top of Phase 1 features.
+PHASE2_LEARNING_RATE: float = 1e-4
+PHASE2_MODEL_PATH: str = "models/pong_margin_targeting"
+PHASE2_LOAD_PATH: str = "models/pong_competent"
+# Rule-based opponent noise levels cycled randomly each episode (VecEnv-friendly mix).
+PHASE2_OPPONENT_NOISE_LEVELS: tuple[float, ...] = (0.04, 0.06, 0.09)
 
 
 @dataclass(frozen=True)

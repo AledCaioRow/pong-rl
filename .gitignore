@@ -9,3 +9,5 @@ __pycache__/
 # Checkpoints (keep directory with .gitkeep)
 models/*.zip
 models/*.pkl
+
+training/logs/
