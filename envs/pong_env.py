@@ -51,6 +51,10 @@ class PongEnv(gym.Env):
         # Rule-based opponent: Gaussian noise (court height units) on tracked y.
         # None -> use config.RULE_BASED_OPPONENT_TRACK_NOISE.
         opponent_track_noise: Optional[float] = None,
+        # Scales cfg.PADDLE_SPEED (e.g. 0.6 for slower human playtests; keep 1.0 for training).
+        paddle_speed_scale: float = 1.0,
+        # Scales cfg.BALL_INITIAL_SPEED / BALL_MAX_SPEED (human playtests; keep 1.0 for training).
+        ball_speed_scale: float = 1.0,
     ) -> None:
         super().__init__()
         self.opponent = opponent
@@ -61,6 +65,10 @@ class PongEnv(gym.Env):
             if opponent_track_noise is None
             else opponent_track_noise
         )
+        self._paddle_speed = float(cfg.PADDLE_SPEED * max(0.01, paddle_speed_scale))
+        _bs = max(0.05, float(ball_speed_scale))
+        self._ball_initial_speed = float(cfg.BALL_INITIAL_SPEED * _bs)
+        self._ball_max_speed = float(cfg.BALL_MAX_SPEED * _bs)
 
         low = np.array(
             [
@@ -171,7 +179,7 @@ class PongEnv(gym.Env):
 
         direction = 1.0 if rng.random() < 0.5 else -1.0
         angle = float(rng.uniform(-math.pi / 5, math.pi / 5))
-        speed = cfg.BALL_INITIAL_SPEED
+        speed = self._ball_initial_speed
         self.ball_vx = direction * speed * math.cos(angle)
         self.ball_vy = speed * math.sin(angle)
         self._rally_hits = 0
@@ -243,17 +251,17 @@ class PongEnv(gym.Env):
         """Actions: 0 stay, 1 up (+y), 2 down (-y) in normalised court space."""
         y = self.agent_y
         if action == 1:
-            y += cfg.PADDLE_SPEED
+            y += self._paddle_speed
         elif action == 2:
-            y -= cfg.PADDLE_SPEED
+            y -= self._paddle_speed
         self.agent_y = _clamp(y, self._paddle_min_y, self._paddle_max_y)
 
     def _move_paddle_towards(self, _: float, target_y: float, *, attr: str) -> None:
         y = self.human_y if attr == "human" else self.agent_y
         if target_y > y + 1e-6:
-            y = min(y + cfg.PADDLE_SPEED, target_y)
+            y = min(y + self._paddle_speed, target_y)
         elif target_y < y - 1e-6:
-            y = max(y - cfg.PADDLE_SPEED, target_y)
+            y = max(y - self._paddle_speed, target_y)
         self.human_y = _clamp(y, self._paddle_min_y, self._paddle_max_y)
 
     def _maybe_bounce_off_paddle(self, *, is_agent: bool) -> None:
@@ -279,16 +287,16 @@ class PongEnv(gym.Env):
 
         offset = (self.ball_y - py) / max(cfg.PADDLE_HALF_HEIGHT, 1e-6)
         offset = float(np.clip(offset, -1.0, 1.0))
-        self.ball_vy += offset * cfg.BALL_INITIAL_SPEED * 1.8
+        self.ball_vy += offset * self._ball_initial_speed * 1.8
 
         speed = math.hypot(self.ball_vx, self.ball_vy)
-        cap = cfg.BALL_MAX_SPEED
+        cap = self._ball_max_speed
         if speed > cap and speed > 1e-8:
             s = cap / speed
             self.ball_vx *= s
             self.ball_vy *= s
-        if speed < cfg.BALL_INITIAL_SPEED * 0.35 and speed > 0:
-            s = (cfg.BALL_INITIAL_SPEED * 0.5) / speed
+        if speed < self._ball_initial_speed * 0.35 and speed > 0:
+            s = (self._ball_initial_speed * 0.5) / speed
             self.ball_vx *= s
             self.ball_vy *= s
 
@@ -303,7 +311,7 @@ class PongEnv(gym.Env):
         else:
             direction = -1.0
         angle = float(rng.uniform(-math.pi / 5, math.pi / 5))
-        speed = cfg.BALL_INITIAL_SPEED
+        speed = self._ball_initial_speed
         self.ball_vx = direction * speed * math.cos(angle)
         self.ball_vy = speed * math.sin(angle)
         self._rally_hits = 0

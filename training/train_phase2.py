@@ -56,6 +56,11 @@ def evaluate_margin_error(model: Any, n_episodes: int, seed: int) -> tuple[float
 def main() -> None:
     parser = argparse.ArgumentParser(description="Phase 2 PPO fine-tune (margin targeting).")
     parser.add_argument("--timesteps", type=int, default=cfg.PHASE2_TOTAL_TIMESTEPS)
+    parser.add_argument(
+        "--quick",
+        action="store_true",
+        help=f"Smoke run: {cfg.PHASE2_QUICK_TIMESTEPS} steps. Overrides --timesteps.",
+    )
     parser.add_argument("--n-envs", type=int, default=cfg.PHASE2_N_ENVS)
     parser.add_argument("--learning-rate", type=float, default=cfg.PHASE2_LEARNING_RATE)
     parser.add_argument("--seed", type=int, default=cfg.SEED)
@@ -80,6 +85,10 @@ def main() -> None:
         help="If > 0, report mean |margin - target| over this many games after training.",
     )
     args = parser.parse_args()
+
+    if args.quick:
+        args.timesteps = cfg.PHASE2_QUICK_TIMESTEPS
+        print(f"[quick] {args.timesteps} timesteps (smoke run for margin fine-tune).")
 
     os.chdir(_ROOT)
 

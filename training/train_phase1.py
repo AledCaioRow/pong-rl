@@ -3,7 +3,11 @@ Phase 1: train a competent PPO agent against the rule-based opponent (spec).
 
 Run from the project root, e.g.:
     python training/train_phase1.py
+    python training/train_phase1.py --quick
     python training/train_phase1.py --timesteps 10000 --eval-games 5
+
+Monitoring UI: TensorBoard — py -m pip install tensorboard
+    tensorboard --logdir training/logs/phase1_ppo
 """
 
 from __future__ import annotations
@@ -52,6 +56,11 @@ def main() -> None:
         help="Total environment steps across all parallel envs.",
     )
     parser.add_argument(
+        "--quick",
+        action="store_true",
+        help=f"Smoke run: {cfg.PHASE1_QUICK_TIMESTEPS} steps (~10 min on many CPUs; YMMV). Overrides --timesteps.",
+    )
+    parser.add_argument(
         "--n-envs",
         type=int,
         default=cfg.PHASE1_N_ENVS,
@@ -91,6 +100,13 @@ def main() -> None:
         help="If > 0, run this many eval games after training (deterministic policy).",
     )
     args = parser.parse_args()
+
+    if args.quick:
+        args.timesteps = cfg.PHASE1_QUICK_TIMESTEPS
+        print(
+            f"[quick] {args.timesteps} timesteps "
+            f"(~10 min wall time on a typical desktop CPU; open TensorBoard to watch curves)."
+        )
 
     os.chdir(_ROOT)
 

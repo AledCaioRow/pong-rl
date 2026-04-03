@@ -1,4 +1,5 @@
-# Frontend / debugging (Pygame). On Windows, use Python 3.10–3.12 for prebuilt wheels.
+# Optional: Pygame (play_human_vs_bot.py uses Tkinter only — no pygame needed).
+# On Windows, use Python 3.10–3.12 for pygame wheels; 3.14+ often has no wheel yet.
 -r requirements.txt
 
 pygame>=2.5,<3
