@@ -19,19 +19,19 @@ FPS: int = 60
 DT: float = 1.0 / FPS
 
 # --- Court (internal world space; observations are normalised to [0, 1] where noted) ---
-COURT_WIDTH: float = 1.0
+COURT_WIDTH: float = 1.6
 COURT_HEIGHT: float = 1.0
 
 # --- Paddle geometry & motion (same for agent and human/opponent unless overridden) ---
 PADDLE_HALF_HEIGHT: float = 0.08
 PADDLE_HALF_WIDTH: float = 0.012
-PADDLE_SPEED: float = 0.022
+PADDLE_SPEED: float = 0.026
 
 # --- Ball ---
 BALL_RADIUS: float = 0.015
-BALL_INITIAL_SPEED: float = 0.018
+BALL_INITIAL_SPEED: float = 0.022
 # Used to map ball_vx, ball_vy into approximately [-1, 1] in the observation vector.
-BALL_MAX_SPEED: float = 0.06
+BALL_MAX_SPEED: float = 0.072
 
 # --- Observation / reward placeholders (Phase 2+) ---
 TARGET_MARGIN_MIN: int = 2
@@ -43,7 +43,7 @@ RULE_BASED_OPPONENT_TRACK_NOISE: float = 0.06
 
 # --- Action smoothing (Option D, inference-only; see envs/smooth_action_wrapper.py) ---
 # Minimum env steps the current discrete action is held before switching to another.
-ACTION_HOLD_STEPS: int = 3  # 1 = no smoothing (wrapper not applied in play_human when hold ≤ 1)
+ACTION_HOLD_STEPS: int = 2  # 1 = no smoothing (wrapper not applied in play_human when hold <= 1)
 
 # --- Phase 1 training defaults ---
 PHASE1_TOTAL_TIMESTEPS: int = 2_000_000

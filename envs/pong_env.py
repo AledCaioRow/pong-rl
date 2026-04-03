@@ -35,8 +35,8 @@ def _norm_v(vx: float, vy: float, speed_cap: float | None = None) -> Tuple[float
 class PongEnv(gym.Env):
     """
     Observation (float32 vector length 10):
-        ball_x, ball_y, ball_vx_norm, ball_vy_norm,
-        agent_paddle_y, human_paddle_y,
+        ball_x_norm, ball_y_norm, ball_vx_norm, ball_vy_norm,
+        agent_paddle_y_norm, human_paddle_y_norm,
         score_agent, score_human, target_margin, current_margin
     """
 
@@ -106,12 +106,12 @@ class PongEnv(gym.Env):
         self.observation_space = spaces.Box(low=low, high=high, dtype=np.float32)
         self.action_space = spaces.Discrete(3)
 
-        self.ball_x = 0.5
-        self.ball_y = 0.5
+        self.ball_x = cfg.COURT_WIDTH * 0.5
+        self.ball_y = cfg.COURT_HEIGHT * 0.5
         self.ball_vx = 0.0
         self.ball_vy = 0.0
-        self.agent_y = 0.5
-        self.human_y = 0.5
+        self.agent_y = cfg.COURT_HEIGHT * 0.5
+        self.human_y = cfg.COURT_HEIGHT * 0.5
         self.agent_score = 0
         self.human_score = 0
         # Paddle contacts in the current rally (reset on point scored).
@@ -124,7 +124,9 @@ class PongEnv(gym.Env):
         self._paddle_max_y = cfg.COURT_HEIGHT - cfg.PADDLE_HALF_HEIGHT
 
         # Rendering cache
-        self._render_size = (400, 400)
+        base_h = 360
+        base_w = int(round(base_h * (cfg.COURT_WIDTH / max(cfg.COURT_HEIGHT, 1e-6))))
+        self._render_size = (base_h, max(360, base_w))
 
     @property
     def target_margin(self) -> int:
@@ -145,12 +147,12 @@ class PongEnv(gym.Env):
         margin = self.agent_score - self.human_score
         return np.array(
             [
-                float(self.ball_x),
-                float(self.ball_y),
+                float(self.ball_x / max(cfg.COURT_WIDTH, 1e-6)),
+                float(self.ball_y / max(cfg.COURT_HEIGHT, 1e-6)),
                 nvx,
                 nvy,
-                float(self.agent_y),
-                float(self.human_y),
+                float(self.agent_y / max(cfg.COURT_HEIGHT, 1e-6)),
+                float(self.human_y / max(cfg.COURT_HEIGHT, 1e-6)),
                 float(self.agent_score),
                 float(self.human_score),
                 float(self._target_margin),
@@ -169,8 +171,8 @@ class PongEnv(gym.Env):
 
         self.agent_score = 0
         self.human_score = 0
-        self.agent_y = 0.5
-        self.human_y = 0.5
+        self.agent_y = cfg.COURT_HEIGHT * 0.5
+        self.human_y = cfg.COURT_HEIGHT * 0.5
 
         if options and "target_margin" in options:
             self._target_margin = int(
@@ -178,8 +180,8 @@ class PongEnv(gym.Env):
             )
 
         rng = self.np_random
-        self.ball_x = 0.5
-        self.ball_y = float(rng.uniform(0.25, 0.75))
+        self.ball_x = cfg.COURT_WIDTH * 0.5
+        self.ball_y = float(rng.uniform(0.25 * cfg.COURT_HEIGHT, 0.75 * cfg.COURT_HEIGHT))
 
         direction = 1.0 if rng.random() < 0.5 else -1.0
         angle = float(rng.uniform(-math.pi / 5, math.pi / 5))
@@ -325,8 +327,8 @@ class PongEnv(gym.Env):
 
     def _respawn_ball(self, *, favor_side: Literal["agent", "human"]) -> None:
         rng = self.np_random
-        self.ball_x = 0.5
-        self.ball_y = float(rng.uniform(0.25, 0.75))
+        self.ball_x = cfg.COURT_WIDTH * 0.5
+        self.ball_y = float(rng.uniform(0.25 * cfg.COURT_HEIGHT, 0.75 * cfg.COURT_HEIGHT))
         if favor_side == "agent":
             direction = 1.0
         else:
@@ -347,8 +349,10 @@ class PongEnv(gym.Env):
         img[:] = (24, 24, 32)
 
         def to_px(x: float, y: float) -> Tuple[int, int]:
-            xi = int(np.clip(round(x * w), 0, w - 1))
-            yi = int(np.clip(round((1.0 - y) * h), 0, h - 1))
+            nx = x / max(cfg.COURT_WIDTH, 1e-6)
+            ny = y / max(cfg.COURT_HEIGHT, 1e-6)
+            xi = int(np.clip(round(nx * w), 0, w - 1))
+            yi = int(np.clip(round((1.0 - ny) * h), 0, h - 1))
             return xi, yi
 
         # Paddles

@@ -29,8 +29,20 @@ from envs.smooth_action_wrapper import SmoothActionWrapper
 Opponent = Literal["rule_based", "idle"]
 
 
-def build_env(phase: int, opponent: Opponent, hold_steps: int) -> Any:
-    base = PongEnv(opponent=opponent, render_mode=None)
+def build_env(
+    phase: int,
+    opponent: Opponent,
+    hold_steps: int,
+    *,
+    paddle_speed_scale: float,
+    ball_speed_scale: float,
+) -> Any:
+    base = PongEnv(
+        opponent=opponent,
+        render_mode=None,
+        paddle_speed_scale=paddle_speed_scale,
+        ball_speed_scale=ball_speed_scale,
+    )
     env: Any = MarginTargetingWrapper(base) if phase == 2 else base
     if hold_steps > 1:
         env = SmoothActionWrapper(env, hold_steps=hold_steps)
@@ -133,6 +145,18 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--out", type=str, default=None)
     parser.add_argument(
+        "--paddle-speed-scale",
+        type=float,
+        default=1.0,
+        help="Scale paddle speed in evaluation env (default 1.0).",
+    )
+    parser.add_argument(
+        "--ball-speed-scale",
+        type=float,
+        default=1.0,
+        help="Scale ball speed in evaluation env (default 1.0).",
+    )
+    parser.add_argument(
         "--deterministic",
         action=argparse.BooleanOptionalAction,
         default=cfg.EVAL_DETERMINISTIC,
@@ -155,7 +179,13 @@ def main() -> None:
     hold_steps = max(1, args.hold_steps)
     games_out: list[dict[str, Any]] = []
     for g in range(args.games):
-        env = build_env(args.phase, args.opponent, hold_steps)
+        env = build_env(
+            args.phase,
+            args.opponent,
+            hold_steps,
+            paddle_speed_scale=args.paddle_speed_scale,
+            ball_speed_scale=args.ball_speed_scale,
+        )
         try:
             games_out.append(
                 run_one_game(model, env, g, args.phase, args.seed, args.deterministic)
@@ -172,6 +202,8 @@ def main() -> None:
             "hold_steps": hold_steps,
             "opponent": args.opponent,
             "deterministic": args.deterministic,
+            "paddle_speed_scale": args.paddle_speed_scale,
+            "ball_speed_scale": args.ball_speed_scale,
         },
         "games": games_out,
     }
