@@ -3,8 +3,9 @@ Phase 1: train a competent PPO agent against the rule-based opponent (spec).
 
 Run from the project root, e.g.:
     python training/train_phase1.py
+        (without --model-path you are prompted for a save name; --quick skips the prompt and uses config default)
     python training/train_phase1.py --quick
-    python training/train_phase1.py --timesteps 10000 --eval-games 5
+    python training/train_phase1.py --timesteps 10000 --eval-games 5 --model-path models/my_run
 
 TensorBoard (separate terminal from training — it does not open automatically):
     py -m pip install -r requirements.txt
@@ -26,6 +27,7 @@ if _ROOT not in sys.path:
 
 import config as cfg
 from envs.pong_env import PongEnv
+from training.output_model_path import resolve_output_model_path
 from stable_baselines3 import PPO
 from stable_baselines3.common.env_util import make_vec_env
 
@@ -47,15 +49,34 @@ def _tensorboard_log(path: str | None, no_tensorboard: bool) -> str | None:
     return path
 
 
-def _make_pong() -> PongEnv:
-    return PongEnv(opponent="rule_based")
+def _make_pong(
+    *,
+    paddle_speed_scale: float = 1.0,
+    ball_speed_scale: float = 1.0,
+) -> PongEnv:
+    return PongEnv(
+        opponent="rule_based",
+        paddle_speed_scale=paddle_speed_scale,
+        ball_speed_scale=ball_speed_scale,
+    )
 
 
-def evaluate_win_rate(model: Any, n_episodes: int, seed: int) -> float:
+def evaluate_win_rate(
+    model: Any,
+    n_episodes: int,
+    seed: int,
+    *,
+    paddle_speed_scale: float,
+    ball_speed_scale: float,
+) -> float:
     """Fraction of episodes won by the agent (first to MAX_SCORE)."""
     wins = 0
     for ep in range(n_episodes):
-        env = PongEnv(opponent="rule_based")
+        env = PongEnv(
+            opponent="rule_based",
+            paddle_speed_scale=paddle_speed_scale,
+            ball_speed_scale=ball_speed_scale,
+        )
         obs, _ = env.reset(seed=seed + ep)
         terminated = False
         while not terminated:
@@ -91,6 +112,18 @@ def main() -> None:
         default=cfg.PHASE1_LEARNING_RATE,
     )
     parser.add_argument(
+        "--paddle-speed-scale",
+        type=float,
+        default=1.0,
+        help="Scale paddle speed for training/eval envs (default 1.0).",
+    )
+    parser.add_argument(
+        "--ball-speed-scale",
+        type=float,
+        default=1.0,
+        help="Scale ball speed for training/eval envs (default 1.0).",
+    )
+    parser.add_argument(
         "--seed",
         type=int,
         default=cfg.SEED,
@@ -98,8 +131,11 @@ def main() -> None:
     parser.add_argument(
         "--model-path",
         type=str,
-        default=cfg.PHASE1_MODEL_PATH,
-        help="Path without extension; SB3 saves as .zip",
+        default=argparse.SUPPRESS,
+        help=(
+            "Output path without extension; SB3 saves as .zip. "
+            "If omitted (when not using --quick), you are prompted for a name in the terminal."
+        ),
     )
     parser.add_argument(
         "--tensorboard",
@@ -124,6 +160,8 @@ def main() -> None:
         help="If > 0, run this many eval games after training (deterministic policy).",
     )
     args = parser.parse_args()
+    model_cli_provided = hasattr(args, "model_path")
+    model_cli_value = getattr(args, "model_path", None)
 
     if args.quick:
         args.timesteps = cfg.PHASE1_QUICK_TIMESTEPS
@@ -133,6 +171,14 @@ def main() -> None:
         )
 
     os.chdir(_ROOT)
+
+    model_save_path = resolve_output_model_path(
+        quick=args.quick,
+        cli_provided=model_cli_provided,
+        cli_value=model_cli_value,
+        quick_default=cfg.PHASE1_MODEL_PATH,
+    )
+    print(f"[save] Checkpoint will be written to {model_save_path}.zip")
 
     tensorboard_log = _tensorboard_log(args.tensorboard, args.no_tensorboard)
     if tensorboard_log:
@@ -145,7 +191,10 @@ def main() -> None:
         )
 
     vec_env = make_vec_env(
-        _make_pong,
+        lambda: _make_pong(
+            paddle_speed_scale=args.paddle_speed_scale,
+            ball_speed_scale=args.ball_speed_scale,
+        ),
         n_envs=args.n_envs,
         seed=args.seed,
     )
@@ -162,11 +211,17 @@ def main() -> None:
         total_timesteps=args.timesteps,
         progress_bar=not args.no_progress_bar,
     )
-    model.save(args.model_path)
-    print(f"Saved model to {args.model_path}.zip")
+    model.save(model_save_path)
+    print(f"Saved model to {model_save_path}.zip")
 
     if args.eval_games > 0:
-        rate = evaluate_win_rate(model, args.eval_games, seed=args.seed + 10_000)
+        rate = evaluate_win_rate(
+            model,
+            args.eval_games,
+            seed=args.seed + 10_000,
+            paddle_speed_scale=args.paddle_speed_scale,
+            ball_speed_scale=args.ball_speed_scale,
+        )
         print(f"Eval win rate over {args.eval_games} games: {rate:.1%}")
 
     vec_env.close()

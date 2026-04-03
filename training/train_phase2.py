@@ -8,7 +8,8 @@ Requires a Phase 1 checkpoint:
 
 Then:
     python training/train_phase2.py
-    python training/train_phase2.py --timesteps 8192 --no-tensorboard --eval-games 2
+        (without --model-path you are prompted for a save name; --quick skips the prompt)
+    python training/train_phase2.py --timesteps 8192 --no-tensorboard --eval-games 2 --model-path models/my_margin_run
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ if _ROOT not in sys.path:
 
 import config as cfg
 import numpy as np
+from training.output_model_path import resolve_output_model_path
 from envs.margin_env import MarginTargetingWrapper
 from envs.pong_env import PongEnv
 from stable_baselines3 import PPO
@@ -32,29 +34,54 @@ from stable_baselines3.common.env_util import make_vec_env
 
 
 def _tensorboard_log(path: str | None, no_tensorboard: bool) -> str | None:
+    """Return log dir only if PyTorch can use TensorBoard (same check SB3 uses internally)."""
     if no_tensorboard or not path:
         return None
     try:
-        import tensorboard  # noqa: F401
+        from torch.utils.tensorboard import SummaryWriter
     except ImportError:
+        SummaryWriter = None  # type: ignore[misc, assignment]
+    if SummaryWriter is None:
         print(
-            "[warn] tensorboard not installed; training without TB logs. "
-            "Install: py -m pip install tensorboard"
+            "[warn] TensorBoard not available for PyTorch; training without TB logs. "
+            "Install: py -m pip install -r requirements.txt"
         )
         return None
     return path
 
 
-def _make_margin_env() -> MarginTargetingWrapper:
-    base = PongEnv(opponent="rule_based")
+def _make_margin_env(
+    *,
+    paddle_speed_scale: float = 1.0,
+    ball_speed_scale: float = 1.0,
+) -> MarginTargetingWrapper:
+    base = PongEnv(
+        opponent="rule_based",
+        paddle_speed_scale=paddle_speed_scale,
+        ball_speed_scale=ball_speed_scale,
+    )
     return MarginTargetingWrapper(base, randomize_opponent_noise=True)
 
 
-def evaluate_margin_error(model: Any, n_episodes: int, seed: int) -> tuple[float, float]:
+def evaluate_margin_error(
+    model: Any,
+    n_episodes: int,
+    seed: int,
+    *,
+    paddle_speed_scale: float,
+    ball_speed_scale: float,
+) -> tuple[float, float]:
     """Mean and std of |final_margin - target| over episodes."""
     errors: list[float] = []
     for ep in range(n_episodes):
-        env = MarginTargetingWrapper(PongEnv(opponent="rule_based"), randomize_opponent_noise=True)
+        env = MarginTargetingWrapper(
+            PongEnv(
+                opponent="rule_based",
+                paddle_speed_scale=paddle_speed_scale,
+                ball_speed_scale=ball_speed_scale,
+            ),
+            randomize_opponent_noise=True,
+        )
         obs, _ = env.reset(seed=seed + ep)
         terminated = False
         while not terminated:
@@ -77,6 +104,18 @@ def main() -> None:
     )
     parser.add_argument("--n-envs", type=int, default=cfg.PHASE2_N_ENVS)
     parser.add_argument("--learning-rate", type=float, default=cfg.PHASE2_LEARNING_RATE)
+    parser.add_argument(
+        "--paddle-speed-scale",
+        type=float,
+        default=1.0,
+        help="Scale paddle speed for training/eval envs (default 1.0).",
+    )
+    parser.add_argument(
+        "--ball-speed-scale",
+        type=float,
+        default=1.0,
+        help="Scale ball speed for training/eval envs (default 1.0).",
+    )
     parser.add_argument("--seed", type=int, default=cfg.SEED)
     parser.add_argument(
         "--load-path",
@@ -87,8 +126,11 @@ def main() -> None:
     parser.add_argument(
         "--model-path",
         type=str,
-        default=cfg.PHASE2_MODEL_PATH,
-        help="Output path without extension; saved as .zip",
+        default=argparse.SUPPRESS,
+        help=(
+            "Output path without extension; saved as .zip. "
+            "If omitted (when not using --quick), you are prompted for a name in the terminal."
+        ),
     )
     parser.add_argument("--tensorboard", type=str, default="training/logs/phase2_ppo")
     parser.add_argument("--no-tensorboard", action="store_true")
@@ -99,12 +141,22 @@ def main() -> None:
         help="If > 0, report mean |margin - target| over this many games after training.",
     )
     args = parser.parse_args()
+    model_cli_provided = hasattr(args, "model_path")
+    model_cli_value = getattr(args, "model_path", None)
 
     if args.quick:
         args.timesteps = cfg.PHASE2_QUICK_TIMESTEPS
         print(f"[quick] {args.timesteps} timesteps (smoke run for margin fine-tune).")
 
     os.chdir(_ROOT)
+
+    model_save_path = resolve_output_model_path(
+        quick=args.quick,
+        cli_provided=model_cli_provided,
+        cli_value=model_cli_value,
+        quick_default=cfg.PHASE2_MODEL_PATH,
+    )
+    print(f"[save] Checkpoint will be written to {model_save_path}.zip")
 
     load_path = Path(args.load_path)
     if not load_path.suffix:
@@ -116,7 +168,10 @@ def main() -> None:
         )
 
     vec_env = make_vec_env(
-        _make_margin_env,
+        lambda: _make_margin_env(
+            paddle_speed_scale=args.paddle_speed_scale,
+            ball_speed_scale=args.ball_speed_scale,
+        ),
         n_envs=args.n_envs,
         seed=args.seed,
     )
@@ -132,12 +187,16 @@ def main() -> None:
     )
 
     model.learn(total_timesteps=args.timesteps)
-    model.save(args.model_path)
-    print(f"Saved model to {args.model_path}.zip")
+    model.save(model_save_path)
+    print(f"Saved model to {model_save_path}.zip")
 
     if args.eval_games > 0:
         mean_e, std_e = evaluate_margin_error(
-            model, args.eval_games, seed=args.seed + 20_000
+            model,
+            args.eval_games,
+            seed=args.seed + 20_000,
+            paddle_speed_scale=args.paddle_speed_scale,
+            ball_speed_scale=args.ball_speed_scale,
         )
         print(
             f"Eval margin error |final - target|: mean={mean_e:.2f}, std={std_e:.2f} "
