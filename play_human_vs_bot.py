@@ -1,50 +1,15 @@
 """
-Play the training environment locally with Tkinter (stdlib on Windows).
+Tkinter human playtest — copy/paste (PowerShell):
 
-Terminal (PowerShell) from any folder:
     Set-Location "c:\\Users\\aled_\\Downloads\\Pong RL"
-
-No neural net (you = right paddle vs rule-based bot):
     py play_human_vs_bot.py
-
-All checkpoints in one session (recommended): pass a `--model` path **without** `--no-auto-pair`.
-The script then loads **every** `models/*.zip` (and may add the paired default phase `.zip`), so
-you can switch with the top bar or **M**:
     py play_human_vs_bot.py --model models/pong_competent.zip
-
-Current `models/*.zip` included in that merge (after training, list files and extend this list):
-    PowerShell: Get-ChildItem models\\*.zip
-    - models/pong_competent.zip
-    - models/pong_margin_targeting.zip
-
-Single checkpoint only (`--no-auto-pair` turns off the `models/*.zip` merge and phase pairing):
     py play_human_vs_bot.py --no-auto-pair --model models/pong_competent.zip
-    py play_human_vs_bot.py --no-auto-pair --model models/pong_margin_targeting.zip
-
-Multiple explicit paths (merge still adds any other `models/*.zip` unless you pass `--no-auto-pair`):
-    py play_human_vs_bot.py --model models/pong_competent.zip --model models/pong_margin_targeting.zip
-
-Two modes:
-- **Default:** you control the **right** paddle vs rule-based (or idle) bot on the **left**
-  (same sides as Phase 1 training, but you substitute for the RL policy).
-- **With --model:** load a PPO `.zip`; you control the **left** paddle vs the policy on the **right**
-  (matches how the network was trained: agent = right).
-
-Click the court to toggle **KEYS** ↔ **MOUSE**. Optional `--hold-steps` applies action hold
-(SmoothActionWrapper in default mode; ActionSmoother on your inputs in `--model` mode).
-
-Also from project root with `python`:
-    python play_human_vs_bot.py
-    python play_human_vs_bot.py --model models/pong_competent.zip
-  Use `--no-auto-pair` to disable merging extra `models/*.zip`. With 2+ loaded checkpoints,
-  use **Previous model** / **Next model** or **M**. The window uses a wide layout with a centered
-  rectangular playfield.
-
-Pseudonym profiles (friendly in-game name vs technical model path): create a folder
-`player_profiles/<your_name>/profile.json` with `{"model": "models/V1 P1 only.zip"}`.
-The window title and toolbar show the folder name (or optional `"label"` in JSON). Run e.g.:
     py play_human_vs_bot.py --profile pingponger
-    py play_human_vs_bot.py --profile pingponger --model models/pong_margin_targeting.zip
+
+First `--profile` run creates that folder and `profile.json` (edit `"model"` to your `.zip`).
+
+`py play_human_vs_bot.py --help`
 """
 
 from __future__ import annotations
@@ -114,18 +79,27 @@ def _as_zip_path(p: Path) -> Path:
     return p if p.suffix.lower() == ".zip" else p.with_suffix(".zip")
 
 
+def _validate_profile_slug(slug: str) -> None:
+    s = slug.strip()
+    if not s:
+        raise ValueError("Profile name cannot be empty.")
+    for c in '\\/:*?"<>|':
+        if c in s:
+            raise ValueError(f'Profile name cannot contain {c}: {slug!r}')
+
+
 def load_profile_slot(profiles_root: Path, slug: str) -> CheckpointSlot:
-    """Load `player_profiles/<slug>/profile.json` → checkpoint path and display label."""
-    folder = profiles_root / slug
-    if not folder.is_dir():
-        raise FileNotFoundError(
-            f"Profile folder not found: {folder} — create it and add profile.json "
-            f'with a "model" path (see module docstring).'
-        )
+    """Load `<profiles_root>/<slug>/profile.json`; create a starter file if missing."""
+    _validate_profile_slug(slug)
+    folder = profiles_root / slug.strip()
     cfg_path = folder / "profile.json"
     if not cfg_path.is_file():
-        raise FileNotFoundError(
-            f"Missing {cfg_path} — add JSON with a \"model\" key pointing at your .zip."
+        folder.mkdir(parents=True, exist_ok=True)
+        default_model = _as_zip_path(Path(cfg.PHASE1_MODEL_PATH))
+        template = {"model": str(default_model).replace("\\", "/")}
+        cfg_path.write_text(json.dumps(template, indent=2) + "\n", encoding="utf-8")
+        _safe_print(
+            f'[play] Created {cfg_path} - edit "model" if it is not the .zip you want.'
         )
     try:
         data = json.loads(cfg_path.read_text(encoding="utf-8"))
@@ -141,7 +115,7 @@ def load_profile_slot(profiles_root: Path, slug: str) -> CheckpointSlot:
     if isinstance(label_raw, str) and label_raw.strip():
         display = label_raw.strip()
     else:
-        display = slug
+        display = slug.strip()
     return CheckpointSlot(path=path, display_name=display)
 
 
@@ -207,8 +181,8 @@ def main() -> None:
         metavar="NAME",
         default=None,
         help=(
-            "Load player_profiles/<NAME>/profile.json: \"model\" points at the real .zip; "
-            "UI shows folder name or JSON \"label\"."
+            "In-game nickname: player_profiles/<NAME>/profile.json (auto-created with a default "
+            'model path if missing; edit JSON keys "model" and optional "label").'
         ),
     )
     parser.add_argument(
